@@ -304,3 +304,256 @@ def test_hierarchy_entry_tier():
     assert ny == "M1"
     asian = th._select_entry_tier(Session.ASIAN, Regime.RANGING)
     assert asian == "M15"
+
+
+# =====================================================================
+# 7-Agent Institutional Research Team Tests
+# =====================================================================
+
+from xauusd_bot.config import Config
+from xauusd_bot.main import InstitutionalResearchTeam
+from xauusd_bot.models import (
+    AccountInfo, DailyState, NewsCatalystBrief, QuantHypothesis,
+    RiskVerdict, TechnicalStructure, FundamentalDossier, ResearchPlan,
+)
+
+
+def _make_dummy_feed(bullish: bool = True):
+    trend = _trending_bull(100) if bullish else _trending_bear(100)
+    return {
+        "H4": _make_tfdata("H4", trend),
+        "H1": _make_tfdata("H1", trend),
+        "M15": _make_tfdata("M15", trend),
+        "M5": _make_tfdata("M5", trend),
+        "M1": _make_tfdata("M1", trend),
+    }
+
+
+def test_agent_01_market_scout():
+    cfg = Config()
+    team = InstitutionalResearchTeam(cfg)
+    feeds = {
+        "XAUUSD": _make_dummy_feed(True),
+        "EURUSD": _make_dummy_feed(False),
+    }
+    res = team.scout(["XAUUSD", "EURUSD"], feeds, session_name="LONDON")
+    assert len(res.candidates) == 2
+    assert res.session == "LONDON"
+    assert res.candidates[0].priority_rank == 1
+    assert res.candidates[1].priority_rank == 2
+    assert "Scouted 2 symbols" in res.summary
+
+
+def test_agent_02_technical_analyst():
+    cfg = Config()
+    team = InstitutionalResearchTeam(cfg)
+    feed = _make_dummy_feed(True)
+    hierarchy_res = {
+        "h4_bias": Bias.BULLISH,
+        "h1_bias": Bias.BULLISH,
+        "m15_bias": Bias.BULLISH,
+        "m5_bias": Bias.BULLISH,
+        "allowed_direction": "bullish",
+        "m15_zone": (2640.0, 2660.0),
+        "alignment_score": 9,
+    }
+    tech = team.technical("XAUUSD", feed, hierarchy_res, current_price=2650.0)
+    assert tech.symbol == "XAUUSD"
+    assert tech.direction == "BUY"
+    assert tech.h4_bias == "bullish"
+    assert tech.key_support == 2640.0
+    assert tech.key_resistance == 2660.0
+    assert tech.trigger_formed is True
+
+
+def test_agent_03_fundamental_analyst():
+    cfg = Config()
+    team = InstitutionalResearchTeam(cfg)
+    feed = _make_dummy_feed(True)
+    fund = team.fundamental("XAUUSD", feed, tech_dir="BUY")
+    assert fund.symbol == "XAUUSD"
+    assert fund.macro_alignment == "Favorable"
+    assert fund.score > 0
+    assert len(fund.tailwinds) > 0
+
+
+def test_agent_04_news_analyst():
+    cfg = Config()
+    team = InstitutionalResearchTeam(cfg)
+    class DummyNewsFilter:
+        def check(self, sym):
+            return True, "No news"
+        calendar = None
+    news_brief = team.news("XAUUSD", DummyNewsFilter())
+    assert news_brief.symbol == "XAUUSD"
+    assert news_brief.is_blocked is False
+    assert news_brief.event_risk_level == "LOW"
+
+
+def test_agent_05_quant_analyst():
+    cfg = Config()
+    team = InstitutionalResearchTeam(cfg)
+    feed = _make_dummy_feed(True)
+    hierarchy_res = {
+        "is_sideways": False,
+        "sideways_reason": "",
+        "alignment_score": 9,
+    }
+    quant = team.quant("XAUUSD", hierarchy_res, feed["M15"], atr_val=2.5,
+                       entry_price=2650.0, sl_price=2645.0, tp_price=2665.0)
+    assert quant.is_sideways is False
+    assert quant.signal_grade == "A"
+    assert quant.expected_rr == 3.0
+    assert "Alpha" in quant.statistical_edge
+
+
+def test_agent_06_risk_manager_kills_invalid_sl():
+    cfg = Config()
+    team = InstitutionalResearchTeam(cfg)
+    news_brief = NewsCatalystBrief(symbol="XAUUSD", is_blocked=False)
+    quant_hyp = QuantHypothesis(symbol="XAUUSD", is_sideways=False, signal_grade="A", expected_rr=2.5)
+
+    # Missing / inverted SL for BUY
+    verdict = team.risk_manager(
+        symbol="XAUUSD",
+        direction=TradeDirection.BUY,
+        entry_price=2650.0,
+        sl_price=2655.0,  # SL above entry for BUY -> FLAWED!
+        tp_price=2670.0,
+        atr_val=2.5,
+        account_info=AccountInfo(equity=100000.0),
+        daily_loss=None,
+        max_dd=None,
+        news_brief=news_brief,
+        quant_hyp=quant_hyp,
+    )
+    assert verdict.is_approved is False
+    assert verdict.status == "KILLED"
+    assert any("Thesis Invalidation Flawed" in r for r in verdict.veto_reasons)
+
+
+def test_agent_06_risk_manager_kills_daily_loss_breach():
+    cfg = Config()
+    team = InstitutionalResearchTeam(cfg)
+    news_brief = NewsCatalystBrief(symbol="XAUUSD", is_blocked=False)
+    quant_hyp = QuantHypothesis(symbol="XAUUSD", is_sideways=False, signal_grade="A", expected_rr=2.5)
+
+    class DummyDailyLoss:
+        def current_daily_loss_pct(self): return 2.9
+        def kill_switch_engaged(self): return True
+
+    verdict = team.risk_manager(
+        symbol="XAUUSD",
+        direction=TradeDirection.BUY,
+        entry_price=2650.0,
+        sl_price=2645.0,
+        tp_price=2665.0,
+        atr_val=2.5,
+        account_info=AccountInfo(equity=100000.0),
+        daily_loss=DummyDailyLoss(),
+        max_dd=None,
+        news_brief=news_brief,
+        quant_hyp=quant_hyp,
+    )
+    assert verdict.is_approved is False
+    assert verdict.status == "KILLED"
+    assert any("Daily loss killswitch active" in r for r in verdict.veto_reasons)
+
+
+def test_agent_06_risk_manager_kills_sideways_regime():
+    cfg = Config()
+    team = InstitutionalResearchTeam(cfg)
+    news_brief = NewsCatalystBrief(symbol="XAUUSD", is_blocked=False)
+    quant_hyp = QuantHypothesis(symbol="XAUUSD", is_sideways=True, signal_grade="C", expected_rr=1.0)
+
+    verdict = team.risk_manager(
+        symbol="XAUUSD",
+        direction=TradeDirection.BUY,
+        entry_price=2650.0,
+        sl_price=2645.0,
+        tp_price=2665.0,
+        atr_val=2.5,
+        account_info=AccountInfo(equity=100000.0),
+        daily_loss=None,
+        max_dd=None,
+        news_brief=news_brief,
+        quant_hyp=quant_hyp,
+    )
+    assert verdict.is_approved is False
+    assert any("Regime Invalidation" in r for r in verdict.veto_reasons)
+
+
+def test_agent_06_risk_manager_approves_valid_trade():
+    cfg = Config()
+    team = InstitutionalResearchTeam(cfg)
+    news_brief = NewsCatalystBrief(symbol="XAUUSD", is_blocked=False)
+    quant_hyp = QuantHypothesis(symbol="XAUUSD", is_sideways=False, signal_grade="A", expected_rr=2.5)
+
+    verdict = team.risk_manager(
+        symbol="XAUUSD",
+        direction=TradeDirection.BUY,
+        entry_price=2650.0,
+        sl_price=2645.0,  # 5.0 distance = 2.0x ATR (optimal)
+        tp_price=2665.0,  # 15.0 distance = 3.0R
+        atr_val=2.5,
+        account_info=AccountInfo(equity=100000.0),
+        daily_loss=None,
+        max_dd=None,
+        news_brief=news_brief,
+        quant_hyp=quant_hyp,
+    )
+    assert verdict.is_approved is True
+    assert verdict.status == "APPROVED"
+    assert len(verdict.veto_reasons) == 0
+    assert "THESIS APPROVED" in verdict.adversarial_assessment
+
+
+def test_agent_07_portfolio_manager_structured_plan(tmp_path):
+    cfg = Config()
+    cfg.trading.research_report_dir = str(tmp_path)
+    team = InstitutionalResearchTeam(cfg)
+
+    tech = TechnicalStructure(symbol="XAUUSD", current_price=2650.0, h4_bias="bullish", h1_bias="bullish",
+                              key_support=2640.0, key_resistance=2660.0, direction="BUY")
+    fund = FundamentalDossier(symbol="XAUUSD", macro_regime="DXY Softening / Bullion Inflow",
+                              macro_alignment="Favorable", score=0.6)
+    news = NewsCatalystBrief(symbol="XAUUSD", is_blocked=False, event_risk_level="LOW", minutes_to_next_event=120)
+    quant = QuantHypothesis(symbol="XAUUSD", is_sideways=False, signal_grade="A", signal_score=9,
+                            atr_regime="Volatility Expansion", expected_rr=2.5)
+    risk = RiskVerdict(status="APPROVED", veto_reasons=[], thesis_invalidation_level=2645.0,
+                       max_loss_usd=250.0, adversarial_assessment="THESIS APPROVED")
+
+    plan = team.portfolio_manager(
+        symbol="XAUUSD",
+        direction=TradeDirection.BUY,
+        entry_price=2650.0,
+        sl_price=2645.0,
+        tp_price=2665.0,
+        lot_size=0.5,
+        tech=tech,
+        fund=fund,
+        news=news,
+        quant=quant,
+        risk=risk,
+        session_name="LONDON",
+    )
+
+    assert plan.symbol == "XAUUSD"
+    assert plan.action == "EXECUTE_BUY"
+    assert len(plan.inputs) == 6
+    assert "Macro" in plan.inputs
+    assert "HTF Direction" in plan.inputs
+    assert "Trigger" in plan.inputs
+    assert "Risk" in plan.inputs
+    assert "Confluence" in plan.inputs
+    assert "Timing" in plan.inputs
+    assert len(plan.evidence) == 4
+    assert len(plan.risks) == 3
+    assert len(plan.next_steps) == 4
+    assert "# INSTITUTIONAL TRADE & RESEARCH PLAN — AGENT 07" in plan.markdown_dossier
+
+    # Test saving
+    saved_file = team.save_research_plan(plan)
+    assert saved_file.exists()
+    assert "XAUUSD_EXECUTE_BUY.md" in saved_file.name
+

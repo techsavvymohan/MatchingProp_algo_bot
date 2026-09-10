@@ -56,3 +56,23 @@ def test_price_in_zone():
 def test_price_in_zone_none():
     zd = ZoneDetector()
     assert not zd.price_in_zone(100, None)
+
+
+def test_detect_auction_value_area():
+    zd = ZoneDetector()
+    prices = [100.0 + (i % 7) * 2.0 for i in range(50)]
+    data = _make_data(prices)
+    res = zd.detect_auction_value_area(data, lookback=40, bins=25)
+    assert res is not None
+    assert "val" in res and "poc" in res and "vah" in res
+    assert res["val"] <= res["poc"] <= res["vah"]
+
+
+def test_detect_vwap_extremes():
+    zd = ZoneDetector()
+    prices = [100.0 + i * 0.5 for i in range(30)]
+    data = _make_data(prices)
+    extremes = zd.detect_vwap_extremes(data, period=20)
+    assert extremes is not None
+    vwap, u1, l1, u2, l2 = extremes
+    assert l2 < l1 < vwap < u1 < u2

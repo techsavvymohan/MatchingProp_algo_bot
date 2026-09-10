@@ -19,13 +19,15 @@ class PartialCloseManager:
         avg_entry = cluster.avg_entry_price()
         if avg_entry <= 0:
             return False
-        atr_based = abs(avg_entry - cluster.collective_sl) if cluster.collective_sl else 0
-        if atr_based <= 0:
+        r_dist = cluster.r_distance() if hasattr(cluster, "r_distance") else 0.0
+        if r_dist <= 0:
+            r_dist = abs(avg_entry - cluster.collective_sl) if cluster.collective_sl else 0.0
+        if r_dist <= 0:
             return False
         if cluster.direction == TradeDirection.BUY:
-            move_r = (current_price - avg_entry) / atr_based
+            move_r = (current_price - avg_entry) / r_dist
         else:
-            move_r = (avg_entry - current_price) / atr_based
+            move_r = (avg_entry - current_price) / r_dist
         if move_r >= self.take_profit_r:
             self._tp_hit.add(cluster_id)
             log.info("Partial TP triggered: cluster=%s move=%.2fR pct=%.0f%%",

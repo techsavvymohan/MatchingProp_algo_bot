@@ -20,10 +20,17 @@ class SpreadTracker:
         return self._current
 
     @property
+    def current_spread(self) -> float:
+        return self._current
+
+    @property
     def average(self) -> float:
         if not self._history:
             return self._current
         return sum(self._history) / len(self._history)
+
+    def average_spread(self) -> float:
+        return self.average
 
     @property
     def max(self) -> float:

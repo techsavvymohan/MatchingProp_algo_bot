@@ -21,9 +21,10 @@ TF_BARS_LOOKBACK = {
 
 
 class MultiTFData:
-    def __init__(self, connector, symbol: str = "XAUUSD"):
+    def __init__(self, connector, symbol: str = "XAUUSD", lse_feed: Optional[object] = None):
         self.connector = connector
         self.symbol = symbol
+        self.lse_feed = lse_feed
         self._data: Dict[str, Optional[TimeframeData]] = {tf: None for tf in TIMEFRAMES}
         self._spread_history: Dict[str, deque] = {tf: deque(maxlen=50) for tf in TIMEFRAMES}
 
@@ -37,12 +38,39 @@ class MultiTFData:
                 ok = False
         return ok
 
+    def _update_from_lse(self, tf: str):
+        if not self.lse_feed or not getattr(self.lse_feed, "enabled", False):
+            return
+        candles = self.lse_feed.fetch_candles(self.symbol, tf)
+        if not candles:
+            return
+        times, opens, highs, lows, closes, vols, spreads = [], [], [], [], [], [], []
+        spread_val = 20 if "XAU" in self.symbol else 1
+        for c in candles[-TF_BARS_LOOKBACK.get(tf, 100):]:
+            ts_str = c["ts"]
+            times.append(datetime.fromisoformat(ts_str))
+            opens.append(float(c["open"]))
+            highs.append(float(c["high"]))
+            lows.append(float(c["low"]))
+            closes.append(float(c["close"]))
+            vols.append(int(c.get("volume", 1)))
+            spreads.append(spread_val)
+        if times:
+            self._data[tf] = TimeframeData(
+                tf=tf, time=times, open=opens, high=highs, low=lows, close=closes,
+                tick_volume=vols, spread=spreads,
+            )
+
     def _update_tf(self, tf: str):
         if not self.connector.ensure_connected():
+            self._update_from_lse(tf)
             return
         mt5_tf = self.connector.tf_to_mt5(tf)
         bars = self.connector.copy_rates_from_pos(self.symbol, mt5_tf, 0, TF_BARS_LOOKBACK[tf])
         if bars is None or len(bars) == 0:
+            if self.lse_feed and getattr(self.lse_feed, "enabled", False):
+                self._update_from_lse(tf)
+                return
             log.warning("No %s data returned", tf)
             return
         self._data[tf] = TimeframeData(

@@ -4,6 +4,12 @@ from typing import Optional
 log = logging.getLogger("xauusd_bot.risk.max_dd")
 
 
+class CallableFloat(float):
+    """Float subclass that can also be invoked as a callable `()` for backwards compatibility."""
+    def __call__(self) -> float:
+        return float(self)
+
+
 class MaxDDTracker:
     def __init__(self, max_dd_pct: float = 10.0, buffer_pct: float = 2.0):
         self.max_dd_pct = max_dd_pct
@@ -19,8 +25,8 @@ class MaxDDTracker:
             self._current_dd_pct = max(0.0, (self._peak_equity - equity) / self._peak_equity * 100)
 
     @property
-    def current_dd_pct(self) -> float:
-        return self._current_dd_pct
+    def current_dd_pct(self) -> CallableFloat:
+        return CallableFloat(self._current_dd_pct)
 
     def is_near_limit(self) -> bool:
         effective_limit = self.max_dd_pct - self.buffer_pct
@@ -34,12 +40,16 @@ class MaxDDTracker:
             return True
         if self.is_breached():
             self._breached = True
-            log.critical("MAX DD BREACHED: %.2f%% (limit=%.2f%%)", self._current_dd_pct, self.max_dd_pct)
+            log.critical("MAX DD BREACHED: %.2f%% (hard ceiling=%.2f%%)", self._current_dd_pct, self.max_dd_pct)
             return True
         if self.is_near_limit():
-            log.warning("Near max DD limit: %.2f%% (buffer limit=%.2f%%)",
-                        self._current_dd_pct, self.max_dd_pct - self.buffer_pct)
-        return self._breached
+            self._breached = True
+            log.critical(
+                "MAX DD BUFFER HIT — KILL SWITCH ENGAGED: %.2f%% (buffer ceiling=%.2f%%, hard ceiling=%.2f%%)",
+                self._current_dd_pct, self.max_dd_pct - self.buffer_pct, self.max_dd_pct,
+            )
+            return True
+        return False
 
     def reset(self, peak_equity: float = 0.0):
         self._peak_equity = peak_equity

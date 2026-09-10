@@ -242,3 +242,68 @@ def test_total_open_risk():
     c.legs.append(leg)
     total = pm.total_open_risk(1.0, 100)
     assert abs(total - 2000) < 0.01
+
+
+# ── Quant Upgrades: Kelly Criterion & Volatility Adaptive Sizing ──
+
+def test_kelly_criterion_calculation():
+    # 60% win rate, 1.5 payoff ratio:
+    # Full Kelly: (0.60 * 1.5 - 0.40) / 1.5 = (0.90 - 0.40) / 1.5 = 0.50 / 1.5 = 0.3333
+    # Half Kelly: 0.3333 / 2 = 0.1667 (capped by max_kelly 0.02)
+    kelly_capped = PositionSizer.calculate_kelly_fraction(0.60, 1.5, half_kelly=True, max_kelly=0.02)
+    assert kelly_capped == 0.02
+
+    # Uncapped test
+    kelly_half = PositionSizer.calculate_kelly_fraction(0.60, 1.5, half_kelly=True, max_kelly=1.0)
+    assert abs(kelly_half - (0.50 / 1.5 / 2.0)) < 0.001
+
+    # Full Kelly uncapped
+    kelly_full = PositionSizer.calculate_kelly_fraction(0.60, 1.5, half_kelly=False, max_kelly=1.0)
+    assert abs(kelly_full - (0.50 / 1.5)) < 0.001
+
+    # Negative expectancy / zero edge
+    assert PositionSizer.calculate_kelly_fraction(0.30, 1.0) == 0.0
+    assert PositionSizer.calculate_kelly_fraction(0.0, 2.0) == 0.0
+    assert PositionSizer.calculate_kelly_fraction(0.50, 0.0) == 0.0
+
+
+def test_volatility_adjusted_risk():
+    ps = PositionSizer(initial_risk_pct=0.25)
+    # High volatility expansion: ATR doubled (4.0 vs 2.0 baseline) -> risk scaled down
+    risk_expanded = ps.volatility_adjusted_risk(current_atr=4.0, baseline_atr=2.0)
+    assert abs(risk_expanded - 0.125) < 0.001
+
+    # Low volatility compression: ATR halved (1.0 vs 2.0 baseline) -> risk scaled up (capped at 1.5x)
+    risk_compressed = ps.volatility_adjusted_risk(current_atr=1.0, baseline_atr=2.0)
+    assert abs(risk_compressed - 0.375) < 0.001
+
+    # Normal volatility
+    risk_normal = ps.volatility_adjusted_risk(current_atr=2.0, baseline_atr=2.0)
+    assert abs(risk_normal - 0.25) < 0.001
+
+
+def test_callable_float_parity():
+    dd = MaxDDTracker(10.0, 2.0)
+    dd.update(100000)
+    dd.update(95000)
+    # Both property and method access work
+    assert abs(float(dd.current_dd_pct) - 5.0) < 0.01
+    assert abs(dd.current_dd_pct() - 5.0) < 0.01
+
+    dt = DailyLossTracker(3.0, 1.0)
+    acc = AccountInfo(balance=100000, equity=100000)
+    dt.update(acc)
+    acc.equity = 98000
+    dt.update(acc)
+    assert abs(float(dt.loss_used_pct()) - 2.0) < 0.01
+    assert abs(dt.current_daily_loss_pct() - 2.0) < 0.01
+
+
+def test_max_dd_buffer_kill_switch():
+    dd = MaxDDTracker(max_dd_pct=10.0, buffer_pct=2.0)
+    dd.update(100000)
+    # At 8.0% drawdown (the buffer threshold before 10.0% hard ceiling), kill switch engages
+    dd.update(92000)
+    assert dd.is_near_limit()
+    assert dd.kill_switch_engaged()
+

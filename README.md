@@ -165,10 +165,11 @@ To prevent account bleed during ranging chop, the bot applies a multi-layered vo
 
 ```
 MatchingProp_algo_bot/
-├── data/                         # Historical datasets and market data exports
-│   ├── jan_jul_2026_xauusd.json  # 7-month tick dataset for Gold
-│   ├── jan_jul_2026_eurusd.json  # 7-month tick dataset for EURUSD
-│   └── ...
+├── data/                                  # Historical datasets and market data exports
+│   ├── native_true_jun_sep_xauusd.json    # MT5 100% True Native M1 bars (Gold)
+│   ├── native_true_jun_sep_eurusd.json    # MT5 100% True Native M1 bars (EURUSD)
+│   ├── tv_xauusd_1m.json                  # TradingView True M1 dataset (Gold)
+│   └── tv_eurusd_1m.json                  # TradingView True M1 dataset (EURUSD)
 ├── tests/                        # Comprehensive unit and integration test suite (250 tests)
 │   ├── test_account.py
 │   ├── test_backtest.py
@@ -189,8 +190,6 @@ MatchingProp_algo_bot/
 │   ├── trade/                    # Trade cluster management and lifecycle tracking
 │   ├── config.py                 # Configuration parser and schema validation
 │   └── main.py                   # Bot application entry point
-├── export_jan_jul_2026.py        # MT5 historical data export utility
-├── generate_backtest_data.py     # Synthetic backtest data generator
 ├── requirements.txt              # Project dependencies
 └── README.md                     # Documentation
 ```
@@ -260,11 +259,11 @@ python -m xauusd_bot.main
 
 ### Backtesting Engine
 ```bash
-# Backtest XAUUSD on $100k account
-python -m xauusd_bot.main --backtest data/jan_jul_2026_xauusd.json --balance 100000
+# Backtest XAUUSD on $100k account using 100% True Native MT5 data
+python -m xauusd_bot.main --backtest data/native_true_jun_sep_xauusd.json --balance 100000
 
-# Backtest EURUSD on $100k account
-python -m xauusd_bot.main --backtest data/jan_jul_2026_eurusd.json --balance 100000
+# Backtest EURUSD on $100k account using 100% True Native MT5 data
+python -m xauusd_bot.main --backtest data/native_true_jun_sep_eurusd.json --balance 100000
 ```
 
 ### Test Suite Execution

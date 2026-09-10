@@ -8,7 +8,7 @@ import datetime
 import json
 import logging
 import os
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 try:
     from tvDatafeed import Interval, TvDatafeed
@@ -24,8 +24,8 @@ log = logging.getLogger("xauusd_bot.data.tv_importer")
 def fetch_symbol_data(symbol: str = "XAUUSD", exchange: Optional[str] = None) -> Dict[str, dict]:
     """Fetch multi-timeframe data from TradingView for symbol.
 
-    Fetches M5, M15, H1, H4, and M1 bars, synthesizing earlier M1 bars from M5
-    to produce a continuous 1-month dataset for the backtest engine.
+    Fetches authentic M5, M15, H1, H4, and M1 bars directly from TradingView
+    without synthetic interpolation to produce genuine datasets for backtesting.
     """
     if not TV_DATAFEED_AVAILABLE:
         raise RuntimeError("tvdatafeed library is not installed.")
@@ -66,7 +66,7 @@ def fetch_symbol_data(symbol: str = "XAUUSD", exchange: Optional[str] = None) ->
     if not raw_dfs:
         raise ValueError(f"Failed to fetch any data for {sym} from TradingView.")
 
-    # Format into standard dictionary structure
+    # Format into standard dictionary structure with 100% genuine data
     data_json: Dict[str, dict] = {}
     for tf_name, df in raw_dfs.items():
         times = [ts.isoformat() for ts in df.index]
@@ -81,90 +81,241 @@ def fetch_symbol_data(symbol: str = "XAUUSD", exchange: Optional[str] = None) ->
             "spread": [20 if "XAU" in sym else 1] * len(df),
         }
 
-    # Ensure continuous M1 bars across the full M5/M15 span
-    # If M1 has fewer bars than M5, synthesize earlier M1 bars from M5
-    if "M5" in raw_dfs:
-        m5_df = raw_dfs["M5"]
-        m1_df = raw_dfs.get("M1")
-
-        if m1_df is None or m1_df.empty:
-            m1_start = m5_df.index[-1] + datetime.timedelta(days=1)
-        else:
-            m1_start = m1_df.index[0]
-
-        # Earlier M5 bars before M1 start
-        earlier_m5 = m5_df[m5_df.index < m1_start]
-        if not earlier_m5.empty:
-            syn_times = []
-            syn_opens = []
-            syn_highs = []
-            syn_lows = []
-            syn_closes = []
-            syn_vols = []
-
-            for ts, row in earlier_m5.iterrows():
-                o, h, l, c = row["open"], row["high"], row["low"], row["close"]
-                v = int(row["volume"] / 5) if row["volume"] > 0 else 20
-                for minute_offset in range(5):
-                    sub_ts = ts + datetime.timedelta(minutes=minute_offset)
-                    frac = (minute_offset + 1) / 5.0
-                    sub_close = o + (c - o) * frac
-                    sub_open = o + (c - o) * (minute_offset / 5.0)
-                    sub_high = max(sub_open, sub_close, h if minute_offset == 2 else sub_close)
-                    sub_low = min(sub_open, sub_close, l if minute_offset == 3 else sub_open)
-
-                    syn_times.append(sub_ts.isoformat())
-                    syn_opens.append(float(sub_open))
-                    syn_highs.append(float(sub_high))
-                    syn_lows.append(float(sub_low))
-                    syn_closes.append(float(sub_close))
-                    syn_vols.append(v)
-
-            # Combine synthesized with real M1
-            existing_m1 = data_json.get("M1", {"time": [], "open": [], "high": [], "low": [], "close": [], "tick_volume": [], "spread": []})
-            combined_times = syn_times + existing_m1["time"]
-            combined_opens = syn_opens + existing_m1["open"]
-            combined_highs = syn_highs + existing_m1["high"]
-            combined_lows = syn_lows + existing_m1["low"]
-            combined_closes = syn_closes + existing_m1["close"]
-            combined_vols = syn_vols + existing_m1["tick_volume"]
-            combined_spread = [20 if "XAU" in sym else 1] * len(combined_times)
-
-            data_json["M1"] = {
-                "tf": "M1",
-                "time": combined_times,
-                "open": combined_opens,
-                "high": combined_highs,
-                "low": combined_lows,
-                "close": combined_closes,
-                "tick_volume": combined_vols,
-                "spread": combined_spread,
-            }
-            log.info("Synthesized %d continuous M1 bars covering full M5 month history (total M1: %d)",
-                     len(syn_times), len(combined_times))
-
     return data_json
+
+
+def fetch_lse_data(
+    symbol: str = "XAUUSD",
+    days: int = 30,
+    api_key: str = "lse_live_31f53152fae3fd762294057c154f19b2",
+    http_url: str = "https://api.londonstrategicedge.com/vault",
+) -> Dict[str, dict]:
+    """Fetch multi-timeframe candles from London Strategic Edge API.
+
+    Returns continuous M1, M5, M15, H1, and H4 candles in the standard
+    dictionary format expected by BacktestEngine.
+    """
+    import requests
+    from datetime import datetime, timedelta, timezone
+
+    sym_clean = symbol.upper().replace("/", "")
+    if sym_clean in ("XAUUSD", "GOLD"):
+        lse_sym = "XAU/USD"
+    elif sym_clean == "EURUSD":
+        lse_sym = "EUR/USD"
+    elif sym_clean == "GBPUSD":
+        lse_sym = "GBP/USD"
+    elif "/" in symbol:
+        lse_sym = symbol
+    else:
+        lse_sym = f"{sym_clean[:3]}/{sym_clean[3:]}" if len(sym_clean) == 6 else symbol
+
+    start_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+    tf_configs = [
+        ("H4", "4h"),
+        ("H1", "1h"),
+        ("M15", "15m"),
+        ("M5", "5m"),
+        ("M1", "1m"),
+    ]
+
+    data_json = {}
+    headers = {"x-api-key": api_key}
+    for tf_name, lse_tf in tf_configs:
+        log.info("Fetching LSE %s %s from %s...", lse_sym, tf_name, start_date)
+        try:
+            r = requests.get(
+                f"{http_url}/candles",
+                params={"symbol": lse_sym, "timeframe": lse_tf, "start": start_date},
+                headers=headers,
+                timeout=20,
+            )
+            if r.status_code != 200:
+                log.warning("LSE returned status %d for %s %s", r.status_code, lse_sym, tf_name)
+                continue
+            rows = r.json()
+            if not rows or not isinstance(rows, list):
+                continue
+
+            times = []
+            opens = []
+            highs = []
+            lows = []
+            closes = []
+            vols = []
+            spreads = []
+            spread_val = 20 if "XAU" in sym_clean else 1
+
+            for row in rows:
+                times.append(row["ts"])
+                opens.append(float(row["open"]))
+                highs.append(float(row["high"]))
+                lows.append(float(row["low"]))
+                closes.append(float(row["close"]))
+                vols.append(int(row.get("volume", 1)))
+                spreads.append(spread_val)
+
+            data_json[tf_name] = {
+                "tf": tf_name,
+                "time": times,
+                "open": opens,
+                "high": highs,
+                "low": lows,
+                "close": closes,
+                "tick_volume": vols,
+                "spread": spreads,
+            }
+            log.info("  -> Got %d LSE %s bars", len(times), tf_name)
+        except Exception as exc:
+            log.error("Failed fetching LSE %s %s: %s", lse_sym, tf_name, exc)
+
+    return data_json if data_json else None
+
+
+def check_tv_cdp_status(host: str = "127.0.0.1", port: int = 9222, timeout: float = 2.0) -> Dict[str, Any]:
+    """Check if TradingView Desktop is running with Chrome DevTools debugging on port 9222."""
+    import urllib.error
+    import urllib.request
+
+    url = f"http://{host}:{port}/json/version"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "MatchingProp-ResearchEngine"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode())
+            return {
+                "cdp_connected": True,
+                "browser": data.get("Browser", "Unknown"),
+                "protocol_version": data.get("Protocol-Version", ""),
+                "webSocketDebuggerUrl": data.get("webSocketDebuggerUrl", ""),
+                "error": None,
+            }
+    except Exception as exc:
+        return {
+            "cdp_connected": False,
+            "browser": "",
+            "protocol_version": "",
+            "webSocketDebuggerUrl": "",
+            "error": str(exc),
+        }
+
+
+def export_pine_strategy(output_path: Optional[str] = None, params: Optional[Dict[str, Any]] = None) -> str:
+    """Generate the frozen Pine Script v5 Strategy code for TradingView MCP validation."""
+    p = params or {}
+    lookback = p.get("tbh_lookback", 2)
+    fib_0 = p.get("tbh_fib_0", 0.382)
+    fib_1 = p.get("tbh_fib_1", 0.618)
+    rsi_len = p.get("tbh_rsi_length", 14)
+    rsi_os = p.get("tbh_rsi_oversold", 30.0)
+    rsi_ob = p.get("tbh_rsi_overbought", 70.0)
+    atr_sl = p.get("tbh_atr_sl_mult", 2.0)
+    rr = p.get("tbh_rr_ratio", 1.5)
+
+    code = f'''//@version=5
+strategy("Top and Bottom Hunter Strategy [Research Engine v1.0]", 
+     overlay=true, 
+     initial_capital=100000, 
+     default_qty_type=strategy.percent_of_equity, 
+     default_qty_value=1.0, 
+     commission_type=strategy.commission.cash_per_order, 
+     commission_value=3.5, 
+     slippage=2, 
+     process_orders_on_close=false)
+
+// SWEEPABLE INPUTS (EXPLICIT FOR TRADINGVIEW MCP)
+lookback_fib      = input.int({lookback}, "Fib Lookback Bars", minval=2, maxval=20, group="Fibonacci")
+fib_0             = input.float({fib_0}, "Fib Level 0 (Short)", minval=0.1, maxval=0.5, step=0.05, group="Fibonacci")
+fib_1             = input.float({fib_1}, "Fib Level 1 (Long)", minval=0.5, maxval=0.9, step=0.05, group="Fibonacci")
+
+rsi_length        = input.int({rsi_len}, "RSI Length", minval=2, maxval=50, group="RSI")
+rsi_oversold      = input.float({rsi_os}, "RSI Oversold", minval=10.0, maxval=45.0, step=5.0, group="RSI")
+rsi_overbought    = input.float({rsi_ob}, "RSI Overbought", minval=55.0, maxval=90.0, step=5.0, group="RSI")
+
+atr_length        = input.int(14, "ATR Length", minval=5, maxval=30, group="Risk")
+atr_multiplier_sl = input.float({atr_sl}, "ATR SL Multiplier", minval=1.0, maxval=5.0, step=0.5, group="Risk")
+rr_ratio          = input.float({rr}, "Risk/Reward Ratio (TP)", minval=1.0, maxval=5.0, step=0.5, group="Risk")
+
+use_trend_filter  = input.bool(false, "Enable 200 SMA Filter", group="Regime")
+trend_sma_len     = input.int(200, "Trend SMA Length", group="Regime")
+
+// CALCULATIONS
+range_high        = ta.highest(high, lookback_fib)
+range_low         = ta.lowest(low, lookback_fib)
+fib_range         = range_high - range_low
+
+fib_level_0       = range_high - (fib_range * fib_0)
+fib_level_1       = range_high - (fib_range * fib_1)
+
+rsi_value         = ta.rsi(close, rsi_length)
+atr_val           = ta.atr(atr_length)
+trend_filter      = ta.sma(close, trend_sma_len)
+long_trend_ok     = not use_trend_filter or (close > trend_filter)
+short_trend_ok    = not use_trend_filter or (close < trend_filter)
+
+// CONFIRMED BAR SIGNALS (NO LOOKAHEAD / ZERO REPAINTING)
+buy_condition     = ta.crossover(rsi_value, rsi_oversold) and (close > fib_level_1) and long_trend_ok
+sell_condition    = ta.crossunder(rsi_value, rsi_overbought) and (close < fib_level_0) and short_trend_ok
+
+if (buy_condition and strategy.position_size == 0 and barstate.isconfirmed)
+    entry_price = close
+    sl_dist     = atr_val * atr_multiplier_sl
+    tp_dist     = sl_dist * rr_ratio
+    sl_price    = entry_price - sl_dist
+    tp_price    = entry_price + tp_dist
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Exit Long", from_entry="Long", stop=sl_price, limit=tp_price)
+
+if (sell_condition and strategy.position_size == 0 and barstate.isconfirmed)
+    entry_price = close
+    sl_dist     = atr_val * atr_multiplier_sl
+    tp_dist     = sl_dist * rr_ratio
+    sl_price    = entry_price + sl_dist
+    tp_price    = entry_price - tp_dist
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Exit Short", from_entry="Short", stop=sl_price, limit=tp_price)
+
+plot(fib_level_0, "Fib Level 0", color=color.new(color.red, 30))
+plot(fib_level_1, "Fib Level 1", color=color.new(color.green, 30))
+'''
+    if output_path:
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(code)
+        log.info("Exported Pine Strategy to %s", output_path)
+    return code
+
 
 
 def main():
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
-    parser = argparse.ArgumentParser(description="TradingView Historical Data Importer")
+    parser = argparse.ArgumentParser(description="Historical Data Importer (TradingView & LSE)")
+    parser.add_argument("--source", type=str, default="lse", choices=["lse", "tradingview"],
+                        help="Data source to fetch from: lse or tradingview")
     parser.add_argument("--symbol", type=str, default="XAUUSD", help="Symbol to import (e.g. XAUUSD, EURUSD)")
     parser.add_argument("--exchange", type=str, default=None, help="TradingView Exchange (e.g. OANDA, FX_IDC)")
+    parser.add_argument("--days", type=int, default=30, help="Days of history to import (default: 30)")
+    parser.add_argument("--api-key", type=str, default=os.getenv("LSE_API_KEY", "lse_live_31f53152fae3fd762294057c154f19b2"),
+                        help="LSE API Key")
     parser.add_argument("--output", type=str, default=None, help="Output JSON path")
     args = parser.parse_args()
 
     symbol = args.symbol.upper()
-    output_file = args.output or f"data/tv_{symbol.lower()}_1m.json"
+    output_file = args.output or f"data/{args.source}_{symbol.lower()}_data.json"
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
-    data = fetch_symbol_data(symbol, args.exchange)
+    if args.source == "lse":
+        log.info("Fetching data from London Strategic Edge (LSE)...")
+        data = fetch_lse_data(symbol, days=args.days, api_key=args.api_key)
+    else:
+        log.info("Fetching data from TradingView...")
+        data = fetch_symbol_data(symbol, args.exchange)
+
     with open(output_file, "w") as f:
         json.dump(data, f)
-    log.info("Saved %s TradingView historical data to %s", symbol, output_file)
+    log.info("Saved %s %s historical data to %s", symbol, args.source.upper(), output_file)
     for tf, d in data.items():
         log.info("  %s: %d bars (first=%s, last=%s)", tf, len(d["close"]), d["time"][0], d["time"][-1])
 
 
 if __name__ == "__main__":
     main()
+

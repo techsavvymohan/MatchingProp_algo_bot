@@ -113,3 +113,21 @@ def test_aggregate_to_h4():
     h4 = m.aggregate_to_tf("H4")
     assert h4 is not None
     assert h4.tf == "H4"
+
+
+def test_multi_tf_lse_fallback():
+    conn = _make_connector()
+    conn.copy_rates_from_pos.return_value = None  # MT5 rates return None
+
+    mock_lse = MagicMock()
+    mock_lse.enabled = True
+    mock_lse.fetch_candles.return_value = [
+        {"ts": "2026-09-08 20:00:00.000000", "symbol": "XAU/USD", "open": 2000, "high": 2005, "low": 1995, "close": 2002, "volume": 50}
+    ]
+
+    m = MultiTFData(conn, symbol="XAUUSD", lse_feed=mock_lse)
+    ok = m.update_all()
+    assert ok
+    m1_data = m.get("M1")
+    assert m1_data is not None
+    assert m1_data.close[-1] == 2002

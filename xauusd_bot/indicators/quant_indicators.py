@@ -9,7 +9,7 @@ Includes:
 - Dual Thrust intraday breakout boundaries
 """
 import math
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 def heikin_ashi(
@@ -425,3 +425,208 @@ def dual_thrust_range(
     lower_trigger = cur_open - k2 * range_val
 
     return upper_trigger, lower_trigger
+
+
+def calc_bar_delta(
+    open_p: float,
+    high_p: float,
+    low_p: float,
+    close_p: float,
+    volume: float,
+) -> float:
+    """Calculate institutional order flow bar delta using microstructure volume decomposition.
+
+    Delta = Aggressive Buyer Volume - Aggressive Seller Volume.
+    Formula: V * (2 * Close - High - Low) / (High - Low)
+    - Close == High: +V (100% buyer dominance)
+    - Close == Low: -V (100% seller dominance)
+    - Close == Midpoint: 0.0 (Balanced auction)
+    """
+    rng = high_p - low_p
+    if rng <= 0 or volume <= 0:
+        return 0.0
+    ratio = (2.0 * close_p - high_p - low_p) / rng
+    ratio = max(-1.0, min(1.0, ratio))
+    return volume * ratio
+
+
+def calc_cvd(
+    opens: List[float],
+    highs: List[float],
+    lows: List[float],
+    closes: List[float],
+    volumes: List[float],
+    lookback: Optional[int] = None,
+) -> List[float]:
+    """Calculate Cumulative Volume Delta (CVD) series over lookback."""
+    n = len(closes)
+    if n == 0:
+        return []
+    start = max(0, n - lookback) if lookback else 0
+    deltas = []
+    cum = 0.0
+    for i in range(start, n):
+        v = volumes[i] if volumes and len(volumes) > i else 1.0
+        d = calc_bar_delta(opens[i], highs[i], lows[i], closes[i], v)
+        cum += d
+        deltas.append(cum)
+    return deltas
+
+
+def check_delta_absorption(
+    highs: List[float],
+    lows: List[float],
+    closes: List[float],
+    opens: List[float],
+    volumes: List[float],
+    sweep_idx: int,
+    reclaim_idx: int,
+    direction: str,
+) -> Tuple[bool, float, str]:
+    """Check for institutional delta absorption at a liquidity sweep extreme.
+
+    - Bullish SSL Sweep:
+      Passive buyers absorb aggressive market selling at the low.
+      Confirmed when:
+      1) The displacement/reclaim candle has positive delta (buyers stepped in), OR
+      2) Delta is increasing from sweep to reclaim (buyer momentum expanding).
+
+    - Bearish BSL Sweep:
+      Passive sellers absorb aggressive market buying at the high.
+      Confirmed when:
+      1) The displacement/reclaim candle has negative delta (sellers stepped in), OR
+      2) Delta is decreasing from sweep to reclaim (seller momentum expanding).
+
+    Returns:
+    - (is_absorbed: bool, delta_score: float, reason: str)
+    """
+    n = len(closes)
+    if sweep_idx < 0 or sweep_idx >= n or reclaim_idx < 0 or reclaim_idx >= n:
+        return True, 0.0, "index out of bounds - permissive pass"
+
+    sweep_v = volumes[sweep_idx] if volumes and len(volumes) > sweep_idx else 1.0
+    reclaim_v = volumes[reclaim_idx] if volumes and len(volumes) > reclaim_idx else 1.0
+
+    d_sweep = calc_bar_delta(opens[sweep_idx], highs[sweep_idx], lows[sweep_idx], closes[sweep_idx], sweep_v)
+    d_reclaim = calc_bar_delta(opens[reclaim_idx], highs[reclaim_idx], lows[reclaim_idx], closes[reclaim_idx], reclaim_v)
+
+    if direction == "bullish":
+        if d_reclaim > 0 or d_reclaim >= d_sweep:
+            score = 1.0 if d_reclaim > 0 else 0.5
+            return True, score, f"Bullish Absorption confirmed: d_reclaim={d_reclaim:.1f}, d_sweep={d_sweep:.1f}"
+        return False, -1.0, f"No Bullish Absorption: sellers still dominant on reclaim (d_reclaim={d_reclaim:.1f})"
+    else:
+        if d_reclaim < 0 or d_reclaim <= d_sweep:
+            score = 1.0 if d_reclaim < 0 else 0.5
+            return True, score, f"Bearish Absorption confirmed: d_reclaim={d_reclaim:.1f}, d_sweep={d_sweep:.1f}"
+        return False, -1.0, f"No Bearish Absorption: buyers still dominant on reclaim (d_reclaim={d_reclaim:.1f})"
+
+
+def calc_delta_divergence(
+    highs: List[float],
+    lows: List[float],
+    closes: List[float],
+    opens: List[float],
+    volumes: List[float],
+    lookback: int = 10,
+) -> Tuple[Optional[str], float, str]:
+    """Calculate Cumulative Volume Delta (CVD) divergence over lookback.
+
+    - Bullish Divergence: Price Lower Low + CVD Higher Low (Smart Money Accumulation).
+    - Bearish Divergence: Price Higher High + CVD Lower High (Smart Money Distribution).
+
+    Returns: (divergence_type: Optional[str], strength: float, reason: str)
+    """
+    n = len(closes)
+    if n < lookback or lookback < 4:
+        return None, 0.0, "insufficient data"
+
+    cvd_series = calc_cvd(opens[-lookback:], highs[-lookback:], lows[-lookback:], closes[-lookback:], volumes[-lookback:])
+    h_slice = highs[-lookback:]
+    l_slice = lows[-lookback:]
+
+    # First half vs second half extremes
+    mid = lookback // 2
+    h1 = max(h_slice[:mid])
+    h2 = max(h_slice[mid:])
+    l1 = min(l_slice[:mid])
+    l2 = min(l_slice[mid:])
+
+    cvd_h1 = max(cvd_series[:mid])
+    cvd_h2 = max(cvd_series[mid:])
+    cvd_l1 = min(cvd_series[:mid])
+    cvd_l2 = min(cvd_series[mid:])
+
+    # Bullish Divergence: Price made lower low (l2 < l1), but CVD made higher low (cvd_l2 > cvd_l1)
+    if l2 < l1 and cvd_l2 > cvd_l1:
+        diff_cvd = cvd_l2 - cvd_l1
+        return "bullish", round(diff_cvd, 2), f"Bullish Delta Divergence: Price LL ({l2:.2f} < {l1:.2f}) with CVD HL ({cvd_l2:.1f} > {cvd_l1:.1f})"
+
+    # Bearish Divergence: Price made higher high (h2 > h1), but CVD made lower high (cvd_h2 < cvd_h1)
+    if h2 > h1 and cvd_h2 < cvd_h1:
+        diff_cvd = cvd_h1 - cvd_h2
+        return "bearish", round(diff_cvd, 2), f"Bearish Delta Divergence: Price HH ({h2:.2f} > {h1:.2f}) with CVD LH ({cvd_h2:.1f} < {cvd_h1:.1f})"
+
+    return None, 0.0, "no divergence"
+
+
+def calc_hvn_lvn_nodes(
+    highs: List[float],
+    lows: List[float],
+    closes: List[float],
+    volumes: List[float],
+    bins: int = 40,
+    hvn_factor: float = 1.4,
+    lvn_factor: float = 0.6,
+) -> Dict[str, Any]:
+    """Identify High Volume Nodes (HVNs) and Low Volume Nodes (LVNs) from price & volume.
+
+    - HVN: Price levels with volume >= hvn_factor * mean_bin_volume (liquidity magnets / support-resistance).
+    - LVN: Price levels with volume <= lvn_factor * mean_bin_volume (fast pass-through / liquidity voids).
+    """
+    n = len(closes)
+    if n == 0 or len(highs) != n or len(lows) != n or len(volumes) != n:
+        return {"poc": 0.0, "vah": 0.0, "val": 0.0, "hvns": [], "lvns": []}
+
+    min_p = min(lows)
+    max_p = max(highs)
+    total_v = sum(volumes)
+
+    if min_p >= max_p or total_v <= 0 or bins <= 0:
+        p = closes[-1] if closes else 0.0
+        return {"poc": p, "vah": p, "val": p, "hvns": [], "lvns": []}
+
+    bin_step = (max_p - min_p) / bins
+    bin_vols = [0.0] * bins
+
+    for h, l, c, v in zip(highs, lows, closes, volumes):
+        if v <= 0:
+            continue
+        i_low = max(0, min(bins - 1, int((l - min_p) / bin_step)))
+        i_high = max(0, min(bins - 1, int((h - min_p) / bin_step)))
+        span = i_high - i_low + 1
+        vol_each = v / span
+        for b in range(i_low, i_high + 1):
+            bin_vols[b] += vol_each
+
+    mean_v = sum(bin_vols) / bins if bins > 0 else 1.0
+    poc_idx = max(range(bins), key=lambda b: bin_vols[b])
+    poc_p = min_p + (poc_idx + 0.5) * bin_step
+
+    hvns = []
+    lvns = []
+    for b in range(bins):
+        lvl = min_p + (b + 0.5) * bin_step
+        if bin_vols[b] >= hvn_factor * mean_v:
+            hvns.append((round(lvl, 4), round(bin_vols[b], 1)))
+        elif bin_vols[b] <= lvn_factor * mean_v:
+            lvns.append((round(lvl, 4), round(bin_vols[b], 1)))
+
+    return {
+        "poc": round(poc_p, 4),
+        "vah": round(max_p, 4),
+        "val": round(min_p, 4),
+        "hvns": hvns,
+        "lvns": lvns,
+    }
+

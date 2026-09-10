@@ -250,3 +250,55 @@ def test_close_cluster_positions():
         assert leg.exit_price == 2010
         assert leg.exit_reason == ExitReason.TAKE_PROFIT
     assert cluster.status == TradeStatus.CLOSED
+
+
+def test_pyramid_can_add_after_breakeven_activated():
+    pm = PyramidManager(max_entries=4, add_trigger_r=0.5)
+    cluster = PyraCluster(direction=TradeDirection.BUY)
+    leg = TradeLeg(direction=TradeDirection.BUY, entry_price=2000, lot_size=0.1, sl_price=1980, status=TradeStatus.OPEN)
+    cluster.legs.append(leg)
+    cluster.collective_sl = 1980
+    # 1R = 20 points
+    assert cluster.r_distance() == 20.0
+
+    # Activate breakeven: collective_sl moves to entry (2000)
+    pm.activate_breakeven(cluster)
+    assert cluster.breakeven_activated
+    assert cluster.collective_sl == 2000
+
+    # Price moves to 2012 (+0.6R > +0.5R trigger). Breakeven must not lock out pyramiding!
+    assert pm.can_add_leg(cluster, current_price=2012, entry_price=2000, collective_sl=cluster.collective_sl)
+
+
+def test_volatility_step_trailing_ratchet():
+    cfg = MagicMock()
+    cfg.atr_period = 14
+    cfg.max_r_multiple = 3.0
+    em = ExitManager(cfg)
+
+    # BUY trade: entry = 2000, sl = 1980 -> 1R = 20 points
+    cluster = PyraCluster(direction=TradeDirection.BUY)
+    leg = TradeLeg(direction=TradeDirection.BUY, entry_price=2000, lot_size=0.1, sl_price=1980, status=TradeStatus.OPEN)
+    cluster.legs.append(leg)
+    cluster.collective_sl = 1980
+
+    # At price 2020 (+1.0R): below +1.5R threshold -> returns None
+    assert em.check_volatility_step_trail(cluster, current_price=2020) is None
+
+    # At price 2030 (+1.5R): ratchets stop to +0.5R = 2010
+    sl_15 = em.check_volatility_step_trail(cluster, current_price=2030)
+    assert sl_15 == 2010.0
+
+    # Apply ratchet: collective_sl becomes 2010
+    cluster.collective_sl = sl_15
+
+    # At price 2042 (+2.1R): ratchets stop to +1.0R = 2020
+    sl_20 = em.check_volatility_step_trail(cluster, current_price=2042)
+    assert sl_20 == 2020.0
+
+    # Apply ratchet: collective_sl becomes 2020
+    cluster.collective_sl = sl_20
+
+    # At price 2065 (+3.25R): ratchets stop to +2.0R = 2040
+    sl_30 = em.check_volatility_step_trail(cluster, current_price=2065)
+    assert sl_30 == 2040.0

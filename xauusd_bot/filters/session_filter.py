@@ -34,4 +34,19 @@ class SessionFilter:
             return ["M1", "M5", "M15", "M30"]
         return ["M15", "M30"]
 
+    def check_ny_liquidity_session(
+        self,
+        now: datetime | None = None,
+        start_time: str = "10:00",
+        end_time: str = "11:00",
+        tz_name: str = "America/New_York",
+    ) -> Tuple[bool, str]:
+        from ..utils.time_utils import is_in_ny_session, to_ny_time
+        in_sess = is_in_ny_session(now, start_time, end_time, tz_name)
+        ny_time_str = to_ny_time(now, tz_name).strftime("%H:%M:%S")
+        if in_sess:
+            return True, f"NY Liquidity Window Active [{ny_time_str} NY]"
+        return False, f"Outside NY Liquidity Window [{ny_time_str} NY, target: {start_time}-{end_time}]"
+
+
 

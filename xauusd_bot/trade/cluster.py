@@ -38,7 +38,18 @@ class ClusterManager:
         return [c for c in self._clusters if c.direction == direction and c.status == TradeStatus.OPEN]
 
     def active_clusters_for_symbol(self, symbol: str) -> List[PyraCluster]:
-        return [c for c in self._clusters if c.symbol == symbol and c.status == TradeStatus.OPEN]
+        return [c for c in self._clusters if c.symbol == symbol and c.status in (TradeStatus.OPEN, TradeStatus.PENDING)]
+
+    def has_same_usd_exposure(self, symbol: str, direction: TradeDirection) -> bool:
+        """Check if any currently OPEN cluster on another symbol shares the same USD directional exposure.
+        For pairs quoted against USD (e.g. XAUUSD, EURUSD, GBPUSD):
+        BUY = Short USD, SELL = Long USD.
+        """
+        for c in self.active:
+            c_sym = getattr(c, "symbol", "")
+            if c_sym != symbol and c.direction == direction:
+                return True
+        return False
 
     def total_open_lots(self, symbol: str = "") -> float:
         if symbol:

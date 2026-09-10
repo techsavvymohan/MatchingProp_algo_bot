@@ -21,7 +21,7 @@ class StatePersistence:
 
     def connect(self):
         if self._conn is None:
-            self._conn = sqlite3.connect(self.db_path)
+            self._conn = sqlite3.connect(self.db_path, timeout=30.0)
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._init_schema()
 

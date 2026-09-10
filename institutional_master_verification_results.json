@@ -1,0 +1,370 @@
+{
+  "audit": {
+    "xau": {
+      "symbol": "XAUUSD",
+      "file": "data/genuine_jan_aug_2026_xauusd.json",
+      "timeframes": {
+        "H4": {
+          "total_bars": 1060,
+          "start_time": "2026-01-01 20:00:00.000000",
+          "end_time": "2026-08-31 20:00:00.000000",
+          "is_strictly_chronological": true,
+          "nan_or_null_count": 0,
+          "all_ohlc_invariants_valid": true,
+          "has_positive_volume": true
+        },
+        "H1": {
+          "total_bars": 3921,
+          "start_time": "2026-01-01 23:00:00.000000",
+          "end_time": "2026-08-31 23:00:00.000000",
+          "is_strictly_chronological": true,
+          "nan_or_null_count": 0,
+          "all_ohlc_invariants_valid": true,
+          "has_positive_volume": true
+        },
+        "M15": {
+          "total_bars": 15678,
+          "start_time": "2026-01-01 23:00:00.000000",
+          "end_time": "2026-08-31 23:45:00.000000",
+          "is_strictly_chronological": true,
+          "nan_or_null_count": 0,
+          "all_ohlc_invariants_valid": true,
+          "has_positive_volume": true
+        },
+        "M5": {
+          "total_bars": 47031,
+          "start_time": "2026-01-01 23:00:00.000000",
+          "end_time": "2026-08-31 23:55:00.000000",
+          "is_strictly_chronological": true,
+          "nan_or_null_count": 0,
+          "all_ohlc_invariants_valid": true,
+          "has_positive_volume": true
+        },
+        "M1": {
+          "total_bars": 234462,
+          "start_time": "2026-01-01 23:04:00.000000",
+          "end_time": "2026-08-31 23:59:00.000000",
+          "is_strictly_chronological": true,
+          "nan_or_null_count": 0,
+          "all_ohlc_invariants_valid": true,
+          "has_positive_volume": true
+        }
+      }
+    },
+    "eur": {
+      "symbol": "EURUSD",
+      "file": "data/genuine_jan_aug_2026_eurusd.json",
+      "timeframes": {
+        "H4": {
+          "total_bars": 1070,
+          "start_time": "2026-01-01 20:00:00.000000",
+          "end_time": "2026-08-31 20:00:00.000000",
+          "is_strictly_chronological": true,
+          "nan_or_null_count": 0,
+          "all_ohlc_invariants_valid": true,
+          "has_positive_volume": true
+        },
+        "H1": {
+          "total_bars": 4136,
+          "start_time": "2026-01-01 21:00:00.000000",
+          "end_time": "2026-08-31 23:00:00.000000",
+          "is_strictly_chronological": true,
+          "nan_or_null_count": 0,
+          "all_ohlc_invariants_valid": true,
+          "has_positive_volume": true
+        },
+        "M15": {
+          "total_bars": 16533,
+          "start_time": "2026-01-01 21:00:00.000000",
+          "end_time": "2026-08-31 23:45:00.000000",
+          "is_strictly_chronological": true,
+          "nan_or_null_count": 0,
+          "all_ohlc_invariants_valid": true,
+          "has_positive_volume": true
+        },
+        "M5": {
+          "total_bars": 49588,
+          "start_time": "2026-01-01 21:05:00.000000",
+          "end_time": "2026-08-31 23:55:00.000000",
+          "is_strictly_chronological": true,
+          "nan_or_null_count": 0,
+          "all_ohlc_invariants_valid": true,
+          "has_positive_volume": true
+        },
+        "M1": {
+          "total_bars": 247011,
+          "start_time": "2026-01-01 21:07:00.000000",
+          "end_time": "2026-08-31 23:59:00.000000",
+          "is_strictly_chronological": true,
+          "nan_or_null_count": 0,
+          "all_ohlc_invariants_valid": true,
+          "has_positive_volume": true
+        }
+      }
+    }
+  },
+  "regimes": {
+    "xau": {
+      "Q1 2026 (Jan - Mar)": {
+        "pnl": 931.4,
+        "return_pct": 9.31,
+        "trades": 110,
+        "win_rate": 61.82,
+        "profit_factor": 1.42,
+        "max_dd": 0.1
+      },
+      "Q2 2026 (Apr - Jun)": {
+        "pnl": 969.31,
+        "return_pct": 9.69,
+        "trades": 112,
+        "win_rate": 59.82,
+        "profit_factor": 1.42,
+        "max_dd": 2.05
+      },
+      "Q3 2026 (Jul - Aug)": {
+        "pnl": 400.81,
+        "return_pct": 4.01,
+        "trades": 73,
+        "win_rate": 56.16,
+        "profit_factor": 1.24,
+        "max_dd": 2.42
+      },
+      "Full Jan-Aug 2026": {
+        "pnl": 2487.96,
+        "return_pct": 24.88,
+        "trades": 297,
+        "win_rate": 59.93,
+        "profit_factor": 1.37,
+        "max_dd": 2.62
+      }
+    },
+    "eur": {
+      "Q1 2026 (Jan - Mar)": {
+        "pnl": 42.25,
+        "return_pct": 0.42,
+        "trades": 30,
+        "win_rate": 66.67,
+        "profit_factor": 1.08,
+        "max_dd": 2.35
+      },
+      "Q2 2026 (Apr - Jun)": {
+        "pnl": 720.22,
+        "return_pct": 7.2,
+        "trades": 108,
+        "win_rate": 66.67,
+        "profit_factor": 1.42,
+        "max_dd": 2.8
+      },
+      "Q3 2026 (Jul - Aug)": {
+        "pnl": 114.41,
+        "return_pct": 1.14,
+        "trades": 78,
+        "win_rate": 61.54,
+        "profit_factor": 1.08,
+        "max_dd": 0.37
+      },
+      "Full Jan-Aug 2026": {
+        "pnl": 1171.63,
+        "return_pct": 11.72,
+        "trades": 224,
+        "win_rate": 66.07,
+        "profit_factor": 1.3,
+        "max_dd": 0.38
+      }
+    }
+  },
+  "scaling": {
+    "xau": {
+      "$10,000": {
+        "final_balance": 12487.96,
+        "pnl": 2487.96,
+        "return_pct": 24.88,
+        "trades": 297,
+        "max_dd": 2.62
+      },
+      "$50,000": {
+        "final_balance": 54766.24,
+        "pnl": 4766.24,
+        "return_pct": 9.53,
+        "trades": 298,
+        "max_dd": 0.85
+      },
+      "$100,000": {
+        "final_balance": 104766.24,
+        "pnl": 4766.24,
+        "return_pct": 4.77,
+        "trades": 298,
+        "max_dd": 0.45
+      },
+      "$200,000": {
+        "final_balance": 204766.24,
+        "pnl": 4766.24,
+        "return_pct": 2.38,
+        "trades": 298,
+        "max_dd": 0.23
+      }
+    },
+    "eur": {
+      "$10,000": {
+        "final_balance": 11171.63,
+        "pnl": 1171.63,
+        "return_pct": 11.72,
+        "trades": 224,
+        "max_dd": 0.38
+      },
+      "$50,000": {
+        "final_balance": 52273.79,
+        "pnl": 2273.79,
+        "return_pct": 4.55,
+        "trades": 224,
+        "max_dd": 0.13
+      },
+      "$100,000": {
+        "final_balance": 102273.79,
+        "pnl": 2273.79,
+        "return_pct": 2.27,
+        "trades": 224,
+        "max_dd": 0.07
+      },
+      "$200,000": {
+        "final_balance": 202273.79,
+        "pnl": 2273.79,
+        "return_pct": 1.14,
+        "trades": 224,
+        "max_dd": 0.03
+      }
+    }
+  },
+  "friction": {
+    "xau": {
+      "Normal ECN (Spread 20, Slip 0.5)": {
+        "pnl": 2487.96,
+        "return_pct": 24.88,
+        "trades": 297,
+        "win_rate": 59.93,
+        "profit_factor": 1.37,
+        "max_dd": 2.62
+      },
+      "Adverse Spread (Spread 40, Slip 0.5)": {
+        "pnl": 2487.96,
+        "return_pct": 24.88,
+        "trades": 297,
+        "win_rate": 59.93,
+        "profit_factor": 1.37,
+        "max_dd": 2.62
+      },
+      "Heavy Slippage (Spread 20, Slip 2.0)": {
+        "pnl": 2487.96,
+        "return_pct": 24.88,
+        "trades": 297,
+        "win_rate": 59.93,
+        "profit_factor": 1.37,
+        "max_dd": 2.62
+      },
+      "Worst-Case Broker (Spread 40, Slip 2.0)": {
+        "pnl": 2487.96,
+        "return_pct": 24.88,
+        "trades": 297,
+        "win_rate": 59.93,
+        "profit_factor": 1.37,
+        "max_dd": 2.62
+      },
+      "ECN Comm ($7/lot) + Worst-Case Broker": {
+        "pnl": 2487.96,
+        "return_pct": 24.88,
+        "trades": 297,
+        "win_rate": 59.93,
+        "profit_factor": 1.37,
+        "max_dd": 2.62
+      }
+    },
+    "eur": {
+      "Normal ECN (Spread 20, Slip 0.5)": {
+        "pnl": 1171.63,
+        "return_pct": 11.72,
+        "trades": 224,
+        "win_rate": 66.07,
+        "profit_factor": 1.3,
+        "max_dd": 0.38
+      },
+      "Adverse Spread (Spread 40, Slip 0.5)": {
+        "pnl": 1171.63,
+        "return_pct": 11.72,
+        "trades": 224,
+        "win_rate": 66.07,
+        "profit_factor": 1.3,
+        "max_dd": 0.38
+      },
+      "Heavy Slippage (Spread 20, Slip 2.0)": {
+        "pnl": 1171.63,
+        "return_pct": 11.72,
+        "trades": 224,
+        "win_rate": 66.07,
+        "profit_factor": 1.3,
+        "max_dd": 0.38
+      },
+      "Worst-Case Broker (Spread 40, Slip 2.0)": {
+        "pnl": 1171.63,
+        "return_pct": 11.72,
+        "trades": 224,
+        "win_rate": 66.07,
+        "profit_factor": 1.3,
+        "max_dd": 0.38
+      },
+      "ECN Comm ($7/lot) + Worst-Case Broker": {
+        "pnl": 1171.63,
+        "return_pct": 11.72,
+        "trades": 224,
+        "win_rate": 66.07,
+        "profit_factor": 1.3,
+        "max_dd": 0.38
+      }
+    }
+  },
+  "monte_carlo_10k": {
+    "xau": {
+      "num_simulations": 10000,
+      "initial_capital": 10000.0,
+      "target_pct_p1": 8.0,
+      "target_pct_p2": 5.0,
+      "max_dd_limit_pct": 10.0,
+      "pass_rate_p1": 97.61,
+      "pass_rate_p2": 98.83,
+      "risk_of_ruin": 0.88,
+      "median_max_dd_pct": 4.64,
+      "p90_max_dd_pct": 7.46,
+      "p95_max_dd_pct": 8.62,
+      "p99_max_dd_pct": 11.11,
+      "worst_simulated_dd_pct": 17.57,
+      "median_trades_to_p1": 78,
+      "median_trades_to_p2": 46,
+      "expected_days_to_p1": 45.9,
+      "expected_days_to_p2": 27.1,
+      "median_losing_streak": 6,
+      "p95_losing_streak": 8,
+      "worst_losing_streak": 17
+    },
+    "eur": {
+      "num_simulations": 10000,
+      "initial_capital": 10000.0,
+      "target_pct_p1": 8.0,
+      "target_pct_p2": 5.0,
+      "max_dd_limit_pct": 10.0,
+      "pass_rate_p1": 81.3,
+      "pass_rate_p2": 92.83,
+      "risk_of_ruin": 0.5,
+      "median_max_dd_pct": 3.87,
+      "p90_max_dd_pct": 6.39,
+      "p95_max_dd_pct": 7.4,
+      "p99_max_dd_pct": 9.68,
+      "worst_simulated_dd_pct": 15.44,
+      "median_trades_to_p1": 112,
+      "median_trades_to_p2": 69,
+      "expected_days_to_p1": 65.9,
+      "expected_days_to_p2": 40.6,
+      "median_losing_streak": 4,
+      "p95_losing_streak": 7,
+      "worst_losing_streak": 13
+    }
+  }
+}

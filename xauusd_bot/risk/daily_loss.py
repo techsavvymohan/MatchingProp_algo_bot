@@ -8,6 +8,12 @@ from ..utils.time_utils import broker_date
 log = logging.getLogger("xauusd_bot.risk.daily_loss")
 
 
+class CallableFloat(float):
+    """Float subclass that can also be invoked as a callable `()` for backwards compatibility."""
+    def __call__(self) -> float:
+        return float(self)
+
+
 class DailyLossTracker:
     def __init__(self, daily_limit_pct: float = 3.0, buffer_pct: float = 1.0,
                  reset_hour: int = 0, reset_tz: str = "UTC"):
@@ -37,10 +43,13 @@ class DailyLossTracker:
             if account.equity > self.state.peak_equity:
                 self.state.peak_equity = account.equity
 
-    def loss_used_pct(self) -> float:
+    def loss_used_pct(self) -> CallableFloat:
         if self.state is None or self.state.start_equity <= 0:
-            return 0.0
-        return max(0.0, -self.state.daily_pnl / self.state.start_equity * 100)
+            return CallableFloat(0.0)
+        return CallableFloat(max(0.0, -self.state.daily_pnl / self.state.start_equity * 100))
+
+    def current_daily_loss_pct(self) -> CallableFloat:
+        return self.loss_used_pct()
 
     def remaining_budget_pct(self) -> float:
         used = self.loss_used_pct()

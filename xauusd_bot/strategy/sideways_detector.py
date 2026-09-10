@@ -123,7 +123,7 @@ class SidewaysDetector:
             reasons.append("Heikin-Ashi indecision dojis")
 
         confidence = sideways_signals / total_checks
-        # Majority of indicators confirm sideways (3 or more out of 5)
+        # Block only when 3+ out of 5 indicators confirm sideways (strong consensus required)
         is_sideways = sideways_signals >= 3
         reason_str = ", ".join(reasons) if reasons else "trending/breakout active"
 

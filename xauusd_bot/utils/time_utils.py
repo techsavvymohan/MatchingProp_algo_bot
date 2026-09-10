@@ -5,6 +5,8 @@ from ..models import Session
 
 
 def _parse_time(t_str: str) -> time:
+    if not t_str or not t_str.strip():
+        return time(0, 0)
     parts = t_str.strip().split(":")
     return time(int(parts[0]), int(parts[1]) if len(parts) > 1 else 0)
 
@@ -64,3 +66,38 @@ def broker_date(
 
 def minutes_since(then: datetime) -> float:
     return (_utcnow() - then).total_seconds() / 60.0
+
+
+def to_ny_time(dt: Optional[datetime] = None, tz_name: str = "America/New_York") -> datetime:
+    """Convert UTC or naive datetime to New York local time handling EDT/EST transitions."""
+    try:
+        import zoneinfo
+    except ImportError:
+        from backports import zoneinfo
+
+    if dt is None:
+        dt = datetime.now(timezone.utc)
+    elif dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    try:
+        ny_tz = zoneinfo.ZoneInfo(tz_name)
+        return dt.astimezone(ny_tz)
+    except Exception:
+        return dt
+
+
+def is_in_ny_session(
+    now: Optional[datetime] = None,
+    start_time: str = "10:00",
+    end_time: str = "11:00",
+    tz_name: str = "America/New_York",
+) -> bool:
+    """Check if time is within the configured New York high-liquidity window."""
+    if not start_time or not end_time:
+        return True
+    ny_dt = to_ny_time(now, tz_name)
+    t = ny_dt.time()
+    st = _parse_time(start_time)
+    et = _parse_time(end_time)
+    return st <= t < et
+

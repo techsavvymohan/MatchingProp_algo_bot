@@ -128,6 +128,36 @@ def test_news_non_usd_ignored():
 
 def test_upcoming_events():
     cal = EconomicCalendar()
-    cal.fetch()
+    now = datetime.now(timezone.utc).timestamp()
+    cal._events = [{
+        "title": "US CPI",
+        "currency": "USD",
+        "impact": "high",
+        "timestamp": now + 1200,
+    }]
     events = cal.upcoming_events
-    assert len(events) > 0
+    assert len(events) == 1
+    assert (events[0].title if hasattr(events[0], "title") else events[0]["title"]) == "US CPI"
+
+
+def test_ny_liquidity_session_filter():
+    sf = SessionFilter()
+
+    # Summer: July 15 (EDT, UTC-4). 10:30 AM NY = 14:30 UTC.
+    summer_ny_inside = datetime(2025, 7, 15, 14, 30, tzinfo=timezone.utc)
+    ok, msg = sf.check_ny_liquidity_session(summer_ny_inside, start_time="10:00", end_time="11:00")
+    assert ok is True
+    assert "Active" in msg
+
+    # Summer: 11:30 AM NY = 15:30 UTC (Outside window)
+    summer_ny_outside = datetime(2025, 7, 15, 15, 30, tzinfo=timezone.utc)
+    ok_out, msg_out = sf.check_ny_liquidity_session(summer_ny_outside, start_time="10:00", end_time="11:00")
+    assert ok_out is False
+    assert "Outside" in msg_out
+
+    # Winter: January 15 (EST, UTC-5). 10:30 AM NY = 15:30 UTC.
+    winter_ny_inside = datetime(2025, 1, 15, 15, 30, tzinfo=timezone.utc)
+    ok_win, msg_win = sf.check_ny_liquidity_session(winter_ny_inside, start_time="10:00", end_time="11:00")
+    assert ok_win is True
+    assert "Active" in msg_win
+

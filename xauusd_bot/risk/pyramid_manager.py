@@ -35,10 +35,15 @@ class PyramidManager:
         avg_entry = cluster.avg_entry_price()
         if avg_entry <= 0:
             return False
+        r_dist = cluster.r_distance() if hasattr(cluster, "r_distance") else 0.0
+        if r_dist <= 0:
+            r_dist = abs(avg_entry - collective_sl) if avg_entry != collective_sl else 0.0
+        if r_dist <= 0:
+            return False
         if cluster.direction == TradeDirection.BUY:
-            move_r = (current_price - avg_entry) / abs(avg_entry - collective_sl) if avg_entry != collective_sl else 0
+            move_r = (current_price - avg_entry) / r_dist
         else:
-            move_r = (avg_entry - current_price) / abs(avg_entry - collective_sl) if avg_entry != collective_sl else 0
+            move_r = (avg_entry - current_price) / r_dist
         if move_r < self.add_trigger_r:
             return False
         log.info("Pyramid add eligible: move=%.2fR threshold=%.1fR leg=%d/%d",

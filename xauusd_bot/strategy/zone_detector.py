@@ -1,7 +1,11 @@
 import logging
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
-from ..indicators.moving_averages import vwap as calc_vwap
+from ..indicators.moving_averages import (
+    calc_volume_profile,
+    vwap as calc_vwap,
+    vwap_bands as calc_vwap_bands,
+)
 from ..models import Bias, TimeframeData
 
 log = logging.getLogger("xauusd_bot.strategy.zone")
@@ -37,3 +41,40 @@ class ZoneDetector:
         if zone is None:
             return False
         return zone[0] <= price <= zone[1]
+
+    def detect_auction_value_area(
+        self,
+        data: TimeframeData,
+        lookback: int = 50,
+        bins: int = 50,
+        value_area_pct: float = 0.70,
+    ) -> Optional[Dict[str, float]]:
+        """Calculate Auction Market Theory Value Area (POC, VAH, VAL) from TimeframeData."""
+        if not data.close or len(data.close) < 5:
+            return None
+        return calc_volume_profile(
+            high=data.high,
+            low=data.low,
+            close=data.close,
+            volume=data.tick_volume,
+            bins=bins,
+            value_area_pct=value_area_pct,
+            lookback=lookback,
+        )
+
+    def detect_vwap_extremes(
+        self,
+        data: TimeframeData,
+        period: int = 20,
+    ) -> Optional[Tuple[float, float, float, float, float]]:
+        """Calculate Session/Rolling VWAP and ±1σ, ±2σ bands."""
+        if not data.close or len(data.close) < period:
+            return None
+        return calc_vwap_bands(
+            high=data.high,
+            low=data.low,
+            close=data.close,
+            volume=data.tick_volume,
+            period=period,
+        )
+

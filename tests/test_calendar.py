@@ -1,23 +1,34 @@
 import time as time_module
 from datetime import datetime, timezone, timedelta
 
-from xauusd_bot.data.economic_calendar import EconomicCalendar
+from xauusd_bot.data.economic_calendar import EconomicCalendar, CalendarEvent
 
 
 def test_calendar_default_fetch():
     cal = EconomicCalendar()
     result = cal.fetch()
-    assert result
-    assert len(cal._events) > 0
+    # Either network succeeded and loaded authentic events, or network was unreachable and events list is empty.
+    # In neither case should any artificial fallback events ever be fabricated.
+    if result:
+        assert len(cal.events) > 0
+        for ev in cal.events:
+            curr = ev.currency if hasattr(ev, "currency") else ev["currency"]
+            assert len(curr) >= 2
+    else:
+        assert len(cal.events) == 0
 
 
 def test_calendar_upcoming_events_sorted():
     cal = EconomicCalendar()
-    cal.fetch()
+    now_ts = datetime.now(timezone.utc).timestamp()
+    cal._events = [
+        {"title": "B", "currency": "USD", "impact": "high", "timestamp": now_ts + 200},
+        {"title": "A", "currency": "USD", "impact": "high", "timestamp": now_ts + 100},
+    ]
     events = cal.upcoming_events
-    if events:
-        timestamps = [e["timestamp"] for e in events]
-        assert timestamps == sorted(timestamps)
+    assert len(events) == 2
+    timestamps = [e["timestamp"] if isinstance(e, dict) else e.timestamp for e in events]
+    assert timestamps == sorted(timestamps)
 
 
 def test_is_blocked_no_api():
@@ -58,3 +69,34 @@ def test_calendar_events_after_now():
     cal._events = [{"title": "Past Event", "currency": "USD", "timestamp": datetime.now(timezone.utc).timestamp() - 3600}]
     upcoming = cal.upcoming_events
     assert len(upcoming) == 0
+
+
+def test_calendar_offline_zero_artificial_events(monkeypatch):
+    import urllib.request
+    def mock_urlopen(*args, **kwargs):
+        raise urllib.error.URLError("No network connection")
+
+    monkeypatch.setattr(urllib.request, "urlopen", mock_urlopen)
+    cal = EconomicCalendar()
+    result = cal.fetch(force=True)
+    assert not result
+    assert len(cal._events) == 0
+    assert len(cal.events) == 0
+    blocked, reason = cal.is_blocked()
+    assert not blocked
+    assert reason is None
+
+
+def test_calendar_event_dataclass_access():
+    now_ts = datetime.now(timezone.utc).timestamp()
+    ev = CalendarEvent(
+        title="US Non-Farm Payrolls",
+        currency="USD",
+        impact="high",
+        timestamp=now_ts,
+        date="2026-09-10T12:30:00Z",
+    )
+    assert ev.currency == "USD"
+    assert ev["currency"] == "USD"
+    assert ev.get("currency") == "USD"
+    assert abs(ev.time.timestamp() - now_ts) < 1e-4
