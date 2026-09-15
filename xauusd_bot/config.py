@@ -80,7 +80,7 @@ class TradingConfig:
 
     max_pyramid_entries: int = 3
     pyramid_add_trigger_r: float = 0.5
-    pyramid_initial_risk_pct: float = 0.50
+    pyramid_initial_risk_pct: float = 0.85
 
     partial_take_profit_r: float = 1.5
     partial_close_pct: float = 50.0
@@ -137,7 +137,7 @@ class TradingConfig:
     xau_retest_max_bars: int = 8  # Maximum M1 bars to wait for confirmed retest
     xau_strict_killzones: bool = True  # London (07-09 UTC) & NY Core (13:30-16:30 UTC)
     xau_target_r: float = 2.0
-    xau_risk_per_trade: float = 0.0025
+    xau_risk_per_trade: float = 0.0085
     xau_max_trades_per_session: int = 2  # Option A: 2 trades per session
     max_daily_trades: int = 4            # Option A: up to 4 trades per day across portfolio
     max_concurrent_pending_orders: int = 2 # Option A: allow up to 2 concurrent pending limit orders
@@ -163,8 +163,8 @@ class TradingConfig:
     xau_partial_close_enabled: bool = False
     xau_london_displacement_atr_mult: float = 0.75
     xau_london_displacement_body_ratio: float = 0.65
-    xau_london_risk_per_trade: float = 0.0025
-    xau_overlap_risk_per_trade: float = 0.0020
+    xau_london_risk_per_trade: float = 0.0085
+    xau_overlap_risk_per_trade: float = 0.0065
 
     eur_target_r: float = 1.6
     eur_breakeven_trigger_r: float = 1.2

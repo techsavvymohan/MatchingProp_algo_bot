@@ -9,7 +9,7 @@ log = logging.getLogger("xauusd_bot.risk.sizer")
 class PositionSizer:
     def __init__(
         self,
-        initial_risk_pct: float = 0.25,
+        initial_risk_pct: float = 0.85,
         max_pyramid_entries: int = 4,
         enable_profit_compounding: bool = False,
         initial_balance: float = 10000.0,
