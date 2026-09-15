@@ -2,7 +2,10 @@ import logging
 import time
 from typing import Optional
 
-import MetaTrader5 as mt5
+try:
+    import MetaTrader5 as mt5
+except ImportError:
+    mt5 = None
 
 from ..config import MT5Config
 
@@ -18,6 +21,9 @@ class MT5Connector:
     def connect(self) -> bool:
         if self._connected:
             return True
+        if mt5 is None:
+            log.error("MetaTrader5 package is not installed. Please run: pip install MetaTrader5")
+            return False
         if not mt5.initialize(
             path=self.cfg.path,
             login=self.cfg.login,
@@ -80,29 +86,39 @@ class MT5Connector:
         return mt5.positions_get(**kwargs) or []
 
     def order_send(self, request: dict) -> Optional[dict]:
+        if mt5 is None:
+            log.error("MetaTrader5 package is not installed.")
+            return None
         result = mt5.order_send(request)
         if result is None:
             log.error("order_send returned None — MT5 error: %s", mt5.last_error())
             return None
-        if result.retcode != mt5.TRADE_RETCODE_DONE:
+        trade_retcode_done = getattr(mt5, "TRADE_RETCODE_DONE", 10009)
+        if result.retcode != trade_retcode_done:
             log.error("Order failed retcode=%d: %s", result.retcode, result.comment)
             return None
         return result
 
     def history_deals_get(self, from_date, to_date):
+        if mt5 is None:
+            return []
         return mt5.history_deals_get(from_date, to_date) or []
 
     def copy_rates_from_pos(self, symbol: str, tf: int, start: int, count: int):
+        if mt5 is None:
+            return None
         return mt5.copy_rates_from_pos(symbol, tf, start, count)
 
     @staticmethod
     def tf_to_mt5(tf: str) -> int:
+        if mt5 is None:
+            return 1
         mapping = {
-            "M1": mt5.TIMEFRAME_M1,
-            "M5": mt5.TIMEFRAME_M5,
-            "M15": mt5.TIMEFRAME_M15,
-            "M30": mt5.TIMEFRAME_M30,
-            "H1": mt5.TIMEFRAME_H1,
-            "H4": mt5.TIMEFRAME_H4,
+            "M1": getattr(mt5, "TIMEFRAME_M1", 1),
+            "M5": getattr(mt5, "TIMEFRAME_M5", 5),
+            "M15": getattr(mt5, "TIMEFRAME_M15", 15),
+            "M30": getattr(mt5, "TIMEFRAME_M30", 30),
+            "H1": getattr(mt5, "TIMEFRAME_H1", 16385),
+            "H4": getattr(mt5, "TIMEFRAME_H4", 16388),
         }
-        return mapping.get(tf, mt5.TIMEFRAME_M1)
+        return mapping.get(tf, 1)

@@ -3,7 +3,17 @@ import threading
 from datetime import datetime, timezone
 from typing import Optional, Set, Tuple
 
-import MetaTrader5 as mt5
+try:
+    import MetaTrader5 as mt5
+except ImportError:
+    class _MT5Fallback:
+        ORDER_TYPE_BUY = 0
+        ORDER_TYPE_SELL = 1
+        ORDER_FILLING_FOK = 0
+        ORDER_FILLING_IOC = 1
+        ORDER_FILLING_RETURN = 2
+        TRADE_ACTION_DEAL = 1
+    mt5 = _MT5Fallback()
 
 from ..config import TradingConfig
 from ..models import AccountInfo, Signal, TradeDirection, TradeLeg, TradeStatus
