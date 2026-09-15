@@ -218,6 +218,15 @@ class TradingConfig:
     fvg_adaptive_retest_tolerance_pct: float = 0.25
     enable_fvg_pyramiding: bool = True
 
+    # ── XAU Dynamic Breakeven & Multi-Order Risk Engine ──────────────────────────
+    xau_breakeven_enabled: bool = True
+    xau_breakeven_r: float = 1.25
+    xau_breakeven_buffer: float = 0.30
+    xau_prevent_duplicate_pending: bool = True
+    xau_h4_bias_guard: bool = False
+    xau_h4_ema_fast: int = 9
+    xau_h4_ema_slow: int = 50
+
     def is_in_eur_session(self, current_time) -> bool:
         """Evaluate whether current UTC time is within EURUSD active institutional session."""
         if current_time is None:
@@ -238,7 +247,7 @@ class TradingConfig:
 
     def get_breakeven_trigger_r(self, symbol: str = "XAUUSD") -> float:
         if symbol and "EUR" in symbol.upper():
-            return self.eur_breakeven_trigger_r
+            return getattr(self, "eur_breakeven_trigger_r", 1.2)
         return self.xau_breakeven_trigger_r
 
     def get_max_holding_bars(self, symbol: str = "XAUUSD") -> int:

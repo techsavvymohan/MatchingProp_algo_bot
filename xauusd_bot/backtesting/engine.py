@@ -374,7 +374,9 @@ class BacktestEngine:
                     has_open = any(c.status == TradeStatus.OPEN for c in self._clusters)
                     allow_entry = (not has_open) or can_pyramid
                     max_pending = getattr(self.cfg.trading, "max_concurrent_pending_orders", 2)
-                    has_pending = len(self._pending_fvg_orders) >= max_pending
+                    prevent_dup = getattr(self.cfg.trading, "xau_prevent_duplicate_pending", True)
+                    has_same_dir_pending = prevent_dup and any(po["direction"] == signal.direction for po in self._pending_fvg_orders)
+                    has_pending = (len(self._pending_fvg_orders) >= max_pending) or has_same_dir_pending
                     max_sess_trades = getattr(self.cfg.trading, "xau_max_trades_per_session", 2)
                     max_daily_trades = getattr(self.cfg.trading, "max_daily_trades", 4)
                     cooldown = getattr(self.cfg.trading, "xau_cooldown_minutes", 5)
@@ -415,6 +417,25 @@ class BacktestEngine:
                             if h_c > g1_h or (h_c == g1_h and m_c >= g1_m):
                                 professor_veto = True
                                 log.debug("[%s] G1 London Close Wall: veto at %02d:%02d UTC", self.symbol, h_c, m_c)
+
+                        # Guard 3 Parity (XAU): H4 Macro Trend Bias — block blind counter-trend entries
+                        if not professor_veto and getattr(self.cfg.trading, "xau_h4_bias_guard", False):
+                            h4_slice = self._slice_data(data, "H4", i, current_time)
+                            if h4_slice is not None and len(h4_slice.close) >= getattr(self.cfg.trading, "xau_h4_ema_slow", 50) + 5:
+                                g3_fast = getattr(self.cfg.trading, "xau_h4_ema_fast", 9)
+                                g3_slow = getattr(self.cfg.trading, "xau_h4_ema_slow", 50)
+                                h4_cl = list(h4_slice.close[-60:])
+                                k_f, k_s = 2.0 / (g3_fast + 1), 2.0 / (g3_slow + 1)
+                                ef = es = h4_cl[0]
+                                for p in h4_cl[1:]:
+                                    ef = p * k_f + ef * (1 - k_f)
+                                    es = p * k_s + es * (1 - k_s)
+                                if ef > es and signal.direction == TradeDirection.SELL:
+                                    professor_veto = True
+                                    log.debug("[%s] XAU Macro Bias: BULLISH H4 vetos SELL signal", self.symbol)
+                                elif ef < es and signal.direction == TradeDirection.BUY:
+                                    professor_veto = True
+                                    log.debug("[%s] XAU Macro Bias: BEARISH H4 vetos BUY signal", self.symbol)
                     else:
                         # Guard 2 (EUR only): ATR Flash-Crash Circuit Breaker
                         # Backtested: +$112 PnL, blocks 6 spike entries
@@ -991,6 +1012,33 @@ class BacktestEngine:
             cluster.breakeven_activated = True
             cluster.collective_sl = cluster.avg_entry_price()
             actions.append({"action": "partial_tp", "price": price, "cluster": cluster.cluster_id})
+
+        # 3b. Dynamic Breakeven Check (when trade reaches xau_breakeven_r, lock risk-free)
+        if getattr(self.cfg.trading, "xau_breakeven_enabled", True) and cluster.status == TradeStatus.OPEN:
+            be_target_r = getattr(self.cfg.trading, "xau_breakeven_r", 1.25)
+            be_buffer = getattr(self.cfg.trading, "xau_breakeven_buffer", 0.30) if "XAU" in getattr(cluster, "symbol", "XAUUSD") else 0.00005
+            for leg in cluster.legs:
+                if leg.status == TradeStatus.OPEN and not getattr(leg, "_be_moved", False) and not getattr(leg, "_is_runner", False):
+                    risk = abs(leg.entry_price - leg.sl_price)
+                    if risk > 0:
+                        if leg.direction == TradeDirection.BUY:
+                            excursion_r = (cluster.highest_price - leg.entry_price) / risk
+                            if excursion_r >= be_target_r:
+                                be_sl = leg.entry_price + be_buffer
+                                if be_sl > leg.sl_price:
+                                    leg.sl_price = be_sl
+                                    leg._be_moved = True
+                                    cluster.breakeven_activated = True
+                                    actions.append({"action": "breakeven_moved", "price": be_sl, "leg_id": leg.leg_id})
+                        else:
+                            excursion_r = (leg.entry_price - cluster.lowest_price) / risk
+                            if excursion_r >= be_target_r:
+                                be_sl = leg.entry_price - be_buffer
+                                if be_sl < leg.sl_price:
+                                    leg.sl_price = be_sl
+                                    leg._be_moved = True
+                                    cluster.breakeven_activated = True
+                                    actions.append({"action": "breakeven_moved", "price": be_sl, "leg_id": leg.leg_id})
 
         # 4. Stagnation Exit
         cluster_bars = getattr(cluster, "_bars_open", 0) + 1
