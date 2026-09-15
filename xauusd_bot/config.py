@@ -246,10 +246,28 @@ class TradingConfig:
             return self.eur_max_holding_bars
         return self.xau_max_holding_bars
 
-    def get_min_sl_distance(self, symbol: str = "XAUUSD") -> float:
+    xau_london_start_hour: int = 7
+    xau_london_start_minute: int = 45
+    xau_london_end_hour: int = 10
+    xau_london_end_minute: int = 30
+
+    def is_in_xau_london_killzone(self, dt) -> bool:
+        """London killzone aligned to authentic London cash liquidity (07:45 - 10:30 UTC)."""
+        if dt is None:
+            return False
+        h = dt.hour if hasattr(dt, "hour") else 0
+        m = dt.minute if hasattr(dt, "minute") else 0
+        return (h == 7 and m >= 45) or (8 <= h < 10) or (h == 10 and m <= 30)
+
+    def get_min_sl_distance(self, symbol: str = "XAUUSD", current_price: float = 0.0, m1_atr: float = 0.0) -> float:
         if symbol and "EUR" in symbol.upper():
             return self.eur_min_sl_distance
-        return self.xau_min_sl_distance
+        dyn_floor = self.xau_min_sl_distance
+        if current_price > 1000:
+            dyn_floor = max(dyn_floor, current_price * 0.0016)
+        if m1_atr > 0:
+            dyn_floor = max(dyn_floor, m1_atr * 1.5)
+        return dyn_floor
 
     def get_fvg_expiry_bars(self, symbol: str = "XAUUSD") -> int:
         if symbol and "EUR" in symbol.upper():

@@ -516,8 +516,11 @@ class TriggerDetector:
                                     entry_price = fvg_high
                                     structural_sl = min(sweep_low, min(l1[sweep_idx:])) - sl_buffer
                                     risk = entry_price - structural_sl
-                                    if min_sl_distance > 0 and risk < min_sl_distance:
-                                        risk = min_sl_distance
+                                    effective_min_sl = min_sl_distance
+                                    if entry_price > 1000:
+                                        effective_min_sl = max(effective_min_sl, entry_price * 0.0016, m1_atr * 1.5)
+                                    if effective_min_sl > 0 and risk < effective_min_sl:
+                                        risk = effective_min_sl
                                         structural_sl = entry_price - risk
                                     if risk > 0:
                                         tp = entry_price + (risk * target_r)
@@ -597,8 +600,11 @@ class TriggerDetector:
                                     entry_price = fvg_low
                                     structural_sl = max(sweep_high, max(h1[sweep_idx:])) + sl_buffer
                                     risk = structural_sl - entry_price
-                                    if min_sl_distance > 0 and risk < min_sl_distance:
-                                        risk = min_sl_distance
+                                    effective_min_sl = min_sl_distance
+                                    if entry_price > 1000:
+                                        effective_min_sl = max(effective_min_sl, entry_price * 0.0016, m1_atr * 1.5)
+                                    if effective_min_sl > 0 and risk < effective_min_sl:
+                                        risk = effective_min_sl
                                         structural_sl = entry_price + risk
                                     if risk > 0:
                                         tp = entry_price - (risk * target_r)

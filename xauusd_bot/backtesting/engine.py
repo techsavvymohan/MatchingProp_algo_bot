@@ -123,6 +123,7 @@ class BacktestEngine:
         for i in range(100, len(m1.close)):
             current_time = m1.time[i]
             current_price = m1.close[i]
+            account.server_time = current_time
 
             if self.start_date is not None:
                 t_chk = current_time.replace(tzinfo=None) if getattr(current_time, "tzinfo", None) else current_time
@@ -162,8 +163,11 @@ class BacktestEngine:
                 is_gold = "XAU" in self.symbol
                 is_eur = "EUR" in self.symbol
                 if getattr(self.cfg.trading, "xau_strict_killzones", True) and is_gold:
-                    # London Open Killzone (07:00-09:00 UTC) & NY Core Killzone (13:30-16:30 UTC)
-                    in_london = (7 <= h_utc < 9)
+                    # London Cash Open Killzone (07:45-10:30 UTC) & NY Core Killzone (13:30-16:30 UTC)
+                    if hasattr(self.cfg.trading, "is_in_xau_london_killzone"):
+                        in_london = self.cfg.trading.is_in_xau_london_killzone(current_time)
+                    else:
+                        in_london = (h_utc == 7 and m_utc >= 45) or (8 <= h_utc < 10) or (h_utc == 10 and m_utc <= 30)
                     in_ny_core = (13 < h_utc < 16) or (h_utc == 13 and m_utc >= 30) or (h_utc == 16 and m_utc <= 30)
                     in_session = in_london or in_ny_core
                 elif is_eur:
@@ -381,10 +385,16 @@ class BacktestEngine:
                         if t_diff < cooldown:
                             in_cooldown = True
 
+                    same_dir_cooldown = False
+                    if getattr(self, "_last_sl_time", None) and getattr(self, "_last_sl_direction", None) == signal.direction:
+                        t_sl_diff = (current_time - self._last_sl_time).total_seconds() / 60.0
+                        if t_sl_diff < cooldown:
+                            same_dir_cooldown = True
+
                     session_limit_reached = False
                     if ecosystem_mode and current_time is not None:
                         h_utc = current_time.hour if hasattr(current_time, "hour") else 0
-                        lon_cutoff = 10 if "EUR" in self.symbol else 9
+                        lon_cutoff = 10 if "EUR" in self.symbol else 11
                         if (7 <= h_utc < lon_cutoff) and self._london_trades_today >= max_sess_trades:
                             session_limit_reached = True
                         elif (not (7 <= h_utc < lon_cutoff)) and self._ny_trades_today >= max_sess_trades:
@@ -461,7 +471,7 @@ class BacktestEngine:
                                     self._g4_pause_until = None
                     # ── End Professor Guards ───────────────────────────────────────────────
 
-                    if not professor_veto and allow_entry and not has_pending and self._session_trades_count < max_daily_trades and not session_limit_reached and not in_cooldown:
+                    if not professor_veto and allow_entry and not has_pending and self._session_trades_count < max_daily_trades and not session_limit_reached and not in_cooldown and not same_dir_cooldown:
                         remaining = self.daily_loss.remaining_budget_amount()
                         sym = signal.symbol
                         is_eur = "EUR" in sym
@@ -709,8 +719,10 @@ class BacktestEngine:
                         enable_hvn_tp_calibration=getattr(self.cfg.trading, "enable_hvn_tp_calibration", True),
                         min_sl_distance=self.cfg.trading.get_min_sl_distance(self.symbol) if hasattr(self.cfg.trading, "get_min_sl_distance") else 0.0,
                     )
-                # Tier 2: London Open Killzone (07:00 - 09:00 UTC) with m15 swing sweeps
-                elif (getattr(self.cfg.trading, "xau_enable_london_asian_sweep", True) and (7 <= h_utc < 9)) or (is_eur and (7 <= h_utc < 12)):
+                # Tier 2: London Cash Open Killzone (07:45 - 10:30 UTC) with m15 swing sweeps
+                elif (getattr(self.cfg.trading, "xau_enable_london_asian_sweep", True) and (self.cfg.trading.is_in_xau_london_killzone(current_time) if hasattr(self.cfg.trading, "is_in_xau_london_killzone") else ((h_utc == 7 and m_utc >= 45) or (8 <= h_utc < 10) or (h_utc == 10 and m_utc <= 30)))) or (is_eur and (7 <= h_utc < 12)):
+                    early_london = (h_utc == 7 and m_utc >= 45) or (h_utc == 8 and m_utc <= 30)
+                    lon_trend_bias = h1_dir if early_london else None
                     seq = self.trigger.detect_xau_scalp_sequence(
                         m15_data=m15_data,
                         m1_data=m1_data,
@@ -726,6 +738,7 @@ class BacktestEngine:
                         telemetry=self._ablation_counters,
                         liquidity_source="m15_swings",
                         current_time=current_time,
+                        trend_bias=lon_trend_bias,
                         enable_delta_absorption=getattr(self.cfg.trading, "enable_delta_absorption", True),
                         delta_absorption_mode=getattr(self.cfg.trading, "delta_absorption_mode", "soft"),
                         enable_hvn_tp_calibration=getattr(self.cfg.trading, "enable_hvn_tp_calibration", True),
@@ -925,6 +938,8 @@ class BacktestEngine:
     def _manage_backtest_exits(self, cluster: PyraCluster, data_all: dict,
                                 idx: int, price: float) -> List[dict]:
         actions = []
+        m1_d = data_all.get("M1")
+        bar_time = m1_d.time[-1] if (m1_d and m1_d.time) else None
         if cluster.direction == TradeDirection.BUY:
             cluster.highest_price = max(cluster.highest_price, price)
         else:
@@ -1038,11 +1053,15 @@ class BacktestEngine:
                     leg.status = TradeStatus.CLOSED
                     leg.exit_price = leg.sl_price
                     leg.exit_reason = ExitReason.STOP_LOSS
+                    self._last_sl_direction = leg.direction
+                    self._last_sl_time = bar_time
                     actions.append({"action": "sl_hit", "price": leg.sl_price})
                 elif sl_hit:
                     leg.status = TradeStatus.CLOSED
                     leg.exit_price = leg.sl_price
                     leg.exit_reason = ExitReason.STOP_LOSS
+                    self._last_sl_direction = leg.direction
+                    self._last_sl_time = bar_time
                     actions.append({"action": "sl_hit", "price": leg.sl_price})
                 elif tp_hit:
                     if enable_runner and not getattr(leg, "_partial_banked", False) and leg.lot_size >= 0.02:
@@ -1078,11 +1097,15 @@ class BacktestEngine:
                     leg.status = TradeStatus.CLOSED
                     leg.exit_price = leg.sl_price
                     leg.exit_reason = ExitReason.STOP_LOSS
+                    self._last_sl_direction = leg.direction
+                    self._last_sl_time = bar_time
                     actions.append({"action": "sl_hit", "price": leg.sl_price})
                 elif sl_hit:
                     leg.status = TradeStatus.CLOSED
                     leg.exit_price = leg.sl_price
                     leg.exit_reason = ExitReason.STOP_LOSS
+                    self._last_sl_direction = leg.direction
+                    self._last_sl_time = bar_time
                     actions.append({"action": "sl_hit", "price": leg.sl_price})
                 elif tp_hit:
                     if enable_runner and not getattr(leg, "_partial_banked", False) and leg.lot_size >= 0.02:

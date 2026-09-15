@@ -1069,7 +1069,7 @@ class XAUUSDBot:
         is_gold = "XAU" in symbol
         is_eur = "EUR" in symbol
         if is_gold and getattr(tc, "xau_strict_killzones", True):
-            in_london = (7 <= h_utc < 9)
+            in_london = tc.is_in_xau_london_killzone(now_utc) if hasattr(tc, "is_in_xau_london_killzone") else ((h_utc == 7 and m_utc >= 45) or (8 <= h_utc < 10) or (h_utc == 10 and m_utc <= 30))
             in_ny_core = (13 < h_utc < 16) or (h_utc == 13 and m_utc >= 30) or (h_utc == 16 and m_utc <= 30)
             session_active = in_london or in_ny_core
         elif is_eur:
