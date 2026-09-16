@@ -74,6 +74,11 @@ class MT5Connector:
     def symbol_info_tick(self, symbol: str = "XAUUSD"):
         return mt5.symbol_info_tick(symbol)
 
+    def symbol_select(self, symbol: str, enable: bool = True) -> bool:
+        if mt5 is None:
+            return False
+        return mt5.symbol_select(symbol, enable)
+
     def account_info(self):
         return mt5.account_info()
 

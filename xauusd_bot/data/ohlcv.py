@@ -65,13 +65,15 @@ class MultiTFData:
         if not self.connector.ensure_connected():
             self._update_from_lse(tf)
             return
+        if hasattr(self.connector, "symbol_select"):
+            self.connector.symbol_select(self.symbol, True)
         mt5_tf = self.connector.tf_to_mt5(tf)
         bars = self.connector.copy_rates_from_pos(self.symbol, mt5_tf, 0, TF_BARS_LOOKBACK[tf])
         if bars is None or len(bars) == 0:
             if self.lse_feed and getattr(self.lse_feed, "enabled", False):
                 self._update_from_lse(tf)
                 return
-            log.warning("No %s data returned", tf)
+            log.warning("[%s] No %s data returned from MT5", self.symbol, tf)
             return
         self._data[tf] = TimeframeData(
             tf=tf,
