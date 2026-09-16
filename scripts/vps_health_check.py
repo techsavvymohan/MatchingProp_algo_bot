@@ -198,33 +198,44 @@ def check_symbols(mt5, cfg, account):
         mt5.symbol_select(sym, True)
         info = mt5.symbol_info(sym)
         tick = mt5.symbol_info_tick(sym)
+        if not tick and info:
+            import time
+            for _ in range(5):
+                time.sleep(0.3)
+                tick = mt5.symbol_info_tick(sym)
+                if tick and tick.bid > 0:
+                    break
 
-        if not info or not tick:
+        bid = tick.bid if (tick and tick.bid > 0) else getattr(info, "bid", 0.0)
+        ask = tick.ask if (tick and tick.ask > 0) else getattr(info, "ask", 0.0)
+
+        if not info or (bid <= 0 and ask <= 0):
             # Query all available symbols from broker
             all_broker_syms = [s.name for s in (mt5.symbols_get() or [])]
             key1 = "XAU" if "XAU" in sym else "EURUSD"
             matches = [s for s in all_broker_syms if key1 in s.upper() or ("GOLD" in s.upper() if "XAU" in sym else False)]
-            if matches:
+            if matches and sym not in matches:
                 check_mark(False, f"{sym} Market Watch Subscription", f"Broker uses: {matches}. Set SYMBOLS={','.join(matches[:2])} in .env")
             else:
-                check_mark(False, f"{sym} Market Watch Subscription", "Not found. In MT5, Right-Click 'Market Watch' -> Click 'Show All'")
+                check_mark(False, f"{sym} Market Watch Subscription", f"Symbol not active. In MT5: Right-Click Market Watch -> 'Show All', then drag {sym} onto a chart")
             continue
 
-        spread_pts = round((tick.ask - tick.bid) / (info.point or 1e-5), 1)
+        point_sz = getattr(info, "point", None) or (0.01 if "XAU" in sym else 0.00001)
+        spread_pts = round((ask - bid) / point_sz, 1)
         check_mark(
             True,
             f"{sym} Feed Active",
-            f"Bid={tick.bid:.{info.digits}f} | Ask={tick.ask:.{info.digits}f} | Spread={spread_pts} pts"
+            f"Bid={bid:.{info.digits}f} | Ask={ask:.{info.digits}f} | Spread={spread_pts} pts"
         )
 
         # Calculate sample lot size
-        if "XAU" in sym:
+        if "XAU" in sym or "GOLD" in sym:
             # Approx $6 Stop Loss on Gold
             sl_dist = 6.0
-            sl_price = tick.bid - sl_dist
+            sl_price = bid - sl_dist
             lots = sizer.calculate_lot_size(
                 acct_model,
-                entry_price=tick.bid,
+                entry_price=bid,
                 sl_price=sl_price,
                 direction=TradeDirection.BUY,
                 point_value=1.0,
@@ -237,10 +248,10 @@ def check_symbols(mt5, cfg, account):
         else:
             # Approx 15 pips Stop Loss on EURUSD
             sl_dist = 0.00150
-            sl_price = tick.bid - sl_dist
+            sl_price = bid - sl_dist
             lots = sizer.calculate_lot_size(
                 acct_model,
-                entry_price=tick.bid,
+                entry_price=bid,
                 sl_price=sl_price,
                 direction=TradeDirection.BUY,
                 point_value=1.0,
