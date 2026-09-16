@@ -92,6 +92,8 @@ class AccountManager:
         info = self._symbol_info(symbol)
         if info and hasattr(info, "point") and isinstance(info.point, (int, float)):
             return info.point
+        if "EUR" in symbol.upper():
+            return 0.00001
         return 0.0001
 
     def tick_size(self, symbol: str = "XAUUSD") -> float:

@@ -269,9 +269,9 @@ class TradingConfig:
         return (h == 7 and m >= 45) or (8 <= h < 10) or (h == 10 and m <= 30)
 
     def get_min_sl_distance(self, symbol: str = "XAUUSD", current_price: float = 0.0, m1_atr: float = 0.0) -> float:
-        if symbol and "EUR" in symbol.upper():
-            return self.eur_min_sl_distance
-        dyn_floor = self.xau_min_sl_distance
+        if (symbol and "EUR" in symbol.upper()) or (0 < current_price < 10.0):
+            return getattr(self, "eur_min_sl_distance", 0.0)
+        dyn_floor = getattr(self, "xau_min_sl_distance", 5.0)
         if current_price > 1000:
             dyn_floor = max(dyn_floor, current_price * 0.0016)
         if m1_atr > 0:

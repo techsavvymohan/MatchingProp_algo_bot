@@ -53,16 +53,47 @@ class OrderEntry:
         self.config = config
         self.reservation = SignalReservation()
 
-    def validate_broker_spec(self, symbol: str, entry_price: float, sl_price: float) -> Tuple[bool, str]:
+    def validate_broker_spec(
+        self,
+        symbol: str,
+        entry_price: float,
+        sl_price: float,
+        tp_price: float = 0.0,
+        direction: Optional[TradeDirection] = None,
+    ) -> Tuple[bool, str]:
         """Validate broker contract specification, tick size, and minimum stop level."""
+        if entry_price <= 0 or sl_price <= 0:
+            return False, f"Invalid prices: entry={entry_price}, sl={sl_price}"
+
+        if tp_price != 0.0 and tp_price <= 0:
+            return False, f"Invalid TP price: {tp_price} (must be > 0)"
+
+        if direction == TradeDirection.BUY:
+            if sl_price >= entry_price:
+                return False, f"Invalid BUY stop: SL ({sl_price}) must be below Entry ({entry_price})"
+            if tp_price > 0 and tp_price <= entry_price:
+                return False, f"Invalid BUY TP: TP ({tp_price}) must be above Entry ({entry_price})"
+        elif direction == TradeDirection.SELL:
+            if sl_price <= entry_price:
+                return False, f"Invalid SELL stop: SL ({sl_price}) must be above Entry ({entry_price})"
+            if tp_price > 0 and tp_price >= entry_price:
+                return False, f"Invalid SELL TP: TP ({tp_price}) must be below Entry ({entry_price})"
+
+        sl_dist = abs(entry_price - sl_price)
+        if entry_price < 10.0 and sl_dist > 0.50:
+            return False, f"Forex SL distance {sl_dist:.5f} is abnormally large (> 0.50) — stop calculation error prevented"
+
         info = self.connector.symbol_info(symbol)
         if info is None:
             return True, "No MT5 symbol info available (offline/dry-run)"
 
         point = getattr(info, "point", 0.01)
-        stops_level = getattr(info, "trade_stops_level", 0) * point
-        freeze_level = getattr(info, "trade_freeze_level", 0) * point
-        sl_dist = abs(entry_price - sl_price)
+        if not isinstance(point, (int, float)):
+            point = 0.01
+        raw_stops = getattr(info, "trade_stops_level", 0)
+        stops_level = (raw_stops if isinstance(raw_stops, (int, float)) else 0) * point
+        raw_freeze = getattr(info, "trade_freeze_level", 0)
+        freeze_level = (raw_freeze if isinstance(raw_freeze, (int, float)) else 0) * point
 
         min_allowed = max(stops_level, freeze_level, 2 * point)
         if sl_dist < min_allowed:
@@ -127,6 +158,14 @@ class OrderEntry:
         else:
             price = tick.bid
             order_type = mt5.ORDER_TYPE_SELL
+
+        spec_ok, spec_msg = self.validate_broker_spec(
+            symbol, price, signal.sl_price, signal.tp_price, signal.direction
+        )
+        if not spec_ok:
+            log.warning("[%s] Market order broker spec validation failed: %s", symbol, spec_msg)
+            self.reservation.release(signal.id, symbol)
+            return None
 
         filling_mode = self.get_filling_mode(symbol)
         request = {
@@ -261,7 +300,9 @@ class OrderEntry:
             return None
 
         # 2. Broker contract specification & stops_level validation
-        spec_ok, spec_msg = self.validate_broker_spec(symbol, limit_price, signal.sl_price)
+        spec_ok, spec_msg = self.validate_broker_spec(
+            symbol, limit_price, signal.sl_price, signal.tp_price, signal.direction
+        )
         if not spec_ok:
             log.warning("[%s] Broker spec validation failed: %s", symbol, spec_msg)
             self.reservation.release(signal.id, symbol)
@@ -293,8 +334,9 @@ class OrderEntry:
                 if result is not None:
                     break
 
+        fmt = ".5f" if ("EUR" in symbol or limit_price < 10.0) else ".2f"
         if result is None:
-            log.error("Failed placing limit order on %s at %.2f", symbol, limit_price)
+            log.error(f"Failed placing limit order on {symbol} at {limit_price:{fmt}}")
             self.reservation.release(signal.id, symbol)
             return None
 
@@ -309,8 +351,7 @@ class OrderEntry:
             open_time=datetime.now(timezone.utc).replace(tzinfo=None),
             status=TradeStatus.PENDING,
         )
-        log.info("Limit order placed: %s %s %.2f lots at %.2f (ticket=%d)",
-                 symbol, signal.direction.value, signal.lot_size, limit_price, result.order)
+        log.info(f"Limit order placed: {symbol} {signal.direction.value} {signal.lot_size:.2f} lots at {limit_price:{fmt}} (ticket={result.order})")
         return leg
 
     def cancel_order(self, ticket: int, signal_id: Optional[str] = None, symbol: Optional[str] = None) -> bool:

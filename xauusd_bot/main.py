@@ -1316,7 +1316,11 @@ class XAUUSDBot:
 
         is_fx = ("EUR" in symbol) or (current_price < 10.0)
         default_pv = 0.00001 if is_fx else 0.01
-        pv = self.account.point_value(symbol) if hasattr(self.account, "point_value") else default_pv
+        pv = self.account.point_size(symbol) if hasattr(self.account, "point_size") else default_pv
+        if is_fx and pv >= 0.01:
+            pv = default_pv
+        elif not is_fx and pv < 0.001:
+            pv = default_pv
 
         seq = self.trigger.detect_xau_scalp_sequence(
             m15_data=m15_closed,
@@ -1333,10 +1337,15 @@ class XAUUSDBot:
             liquidity_source="m15_swings",
             enable_delta_absorption=getattr(tc, "enable_delta_absorption", True),
             enable_hvn_tp_calibration=getattr(tc, "enable_hvn_tp_calibration", True),
-            min_sl_distance=tc.get_min_sl_distance(symbol) if hasattr(tc, "get_min_sl_distance") else 0.0,
+            min_sl_distance=tc.get_min_sl_distance(symbol, current_price, m1_atr) if hasattr(tc, "get_min_sl_distance") else 0.0,
         )
         if not seq:
             return
+
+        # Prevent duplicate pending orders in the same direction
+        if getattr(tc, "xau_prevent_duplicate_pending", True):
+            if any(pc.direction == seq["direction"] for pc in pending_clusters):
+                return
 
         # Telemetry: Log exact times across timezones
         broker_t = broker_date()
@@ -1409,13 +1418,12 @@ class XAUUSDBot:
                 self._xau_london_trades_today = getattr(self, "_xau_london_trades_today", 0) + 1
             elif in_ny_core:
                 self._xau_ny_trades_today = getattr(self, "_xau_ny_trades_today", 0) + 1
-            log.info("[%s] 📥 Pending FVG Limit Order registered in cluster %s (%s): %s at %.2f (SL=%.2f, TP=%.2f)",
-                     symbol, cluster.cluster_id[:8], sess_name, sig.direction.value, seq["entry_price"],
-                     seq["sl_price"], seq["tp_price"])
+            fmt = ".5f" if is_fx else ".2f"
+            log.info(f"[{symbol}] 📥 Pending FVG Limit Order registered in cluster {cluster.cluster_id[:8]} ({sess_name}): {sig.direction.value} at {seq['entry_price']:{fmt}} (SL={seq['sl_price']:{fmt}}, TP={seq['tp_price']:{fmt}})")
 
     def _manage_active_trades(self, data_all: dict, symbol: str = ""):
-
-        clusters = self.cluster_mgr.active_clusters_for_symbol(symbol) if symbol else list(self.cluster_mgr.active)
+        # Exits and trailing only apply to filled, OPEN positions (never pending limit orders)
+        clusters = [c for c in (self.cluster_mgr.active_clusters_for_symbol(symbol) if symbol else list(self.cluster_mgr.active)) if c.status == TradeStatus.OPEN]
         for cluster in clusters:
             actions = self.trade_mgr.manage_exits(cluster, data_all)
             for action in actions:

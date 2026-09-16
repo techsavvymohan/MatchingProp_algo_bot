@@ -460,8 +460,11 @@ class TriggerDetector:
             return None
 
         curr_c = c1[-1]
+        is_forex = (curr_c < 10.0) or (point_value < 0.001)
+        if is_forex and point_value >= 0.01:
+            point_value = 0.00001
+        digits = 5 if is_forex else 2
         sl_buffer = stops_level_points * point_value
-        digits = 2 if point_value >= 0.01 else 5
 
         # -------------------------------------------------------------
         # Long Sequence: Sweep of SSL -> Reclaim -> Bullish Displacement -> Bullish MSS -> Bullish FVG
@@ -519,6 +522,8 @@ class TriggerDetector:
                                     effective_min_sl = min_sl_distance
                                     if entry_price > 1000:
                                         effective_min_sl = max(effective_min_sl, entry_price * 0.0016, m1_atr * 1.5)
+                                    elif entry_price < 10.0 and effective_min_sl > 0.1:
+                                        effective_min_sl = 0.0
                                     if effective_min_sl > 0 and risk < effective_min_sl:
                                         risk = effective_min_sl
                                         structural_sl = entry_price - risk
@@ -603,6 +608,8 @@ class TriggerDetector:
                                     effective_min_sl = min_sl_distance
                                     if entry_price > 1000:
                                         effective_min_sl = max(effective_min_sl, entry_price * 0.0016, m1_atr * 1.5)
+                                    elif entry_price < 10.0 and effective_min_sl > 0.1:
+                                        effective_min_sl = 0.0
                                     if effective_min_sl > 0 and risk < effective_min_sl:
                                         risk = effective_min_sl
                                         structural_sl = entry_price + risk

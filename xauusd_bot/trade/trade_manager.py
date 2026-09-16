@@ -250,6 +250,8 @@ class TradeManager:
         data_all: Dict[str, TimeframeData],
     ) -> List[dict]:
         actions = []
+        if cluster.status != TradeStatus.OPEN:
+            return actions
         m1_data = data_all.get("M1")
         m5_data = data_all.get("M5")
         if not m1_data or not m1_data.close:
@@ -333,24 +335,27 @@ class TradeManager:
         for leg in cluster.legs:
             if leg.status in (TradeStatus.OPEN, TradeStatus.PENDING):
                 sym = getattr(leg, "symbol", "") or getattr(cluster, "symbol", "")
-                if leg.status == TradeStatus.OPEN:
+                was_open = (leg.status == TradeStatus.OPEN)
+                if was_open:
                     self.order_entry.close_position(leg.position_ticket, leg.lot_size, leg.direction, symbol=sym)
                 elif leg.status == TradeStatus.PENDING:
                     self.order_entry.cancel_order(leg.position_ticket, signal_id=getattr(cluster, "signal_id", None), symbol=sym)
 
                 leg.status = TradeStatus.CLOSED
-                leg.exit_price = price
+                leg.exit_price = price if was_open else 0.0
                 leg.exit_reason = reason
                 leg.close_time = now_utc
 
-                # Realized PnL calculation
-                if leg.entry_price and price:
+                # Realized PnL calculation (only for positions that were filled/OPEN)
+                if was_open and leg.entry_price and price:
                     if leg.direction == TradeDirection.BUY:
                         pnl_points = price - leg.entry_price
                     else:
                         pnl_points = leg.entry_price - price
                     c_sz = 100.0 if "XAU" in sym else 100000.0
                     leg.pnl = round(pnl_points * leg.lot_size * c_sz, 2)
+                else:
+                    leg.pnl = 0.0
 
                 if self.persistence:
                     try:

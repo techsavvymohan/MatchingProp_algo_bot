@@ -112,3 +112,115 @@ def test_signal_symbol_support():
     sig.sideways_blocked = True
     assert sig.blocked()
     assert not sig.is_tradeable()
+
+
+def test_eurusd_scalp_sequence_stop_calculation():
+    from xauusd_bot.strategy.trigger import TriggerDetector
+    from xauusd_bot.models import TimeframeData
+
+    engine = TriggerDetector()
+
+    # Synthetic EURUSD data (price ~ 1.155)
+    n = 30
+    times = [1705300000 + i * 60 for i in range(n)]
+    # BSL at 1.15514, SSL at 1.15442
+    highs = [1.15500] * (n - 6) + [1.15520, 1.15510, 1.15505, 1.15500, 1.15495, 1.15490]
+    lows = [1.15450] * (n - 6) + [1.15480, 1.15490, 1.15480, 1.15470, 1.15460, 1.15450]
+    closes = [1.15480] * (n - 6) + [1.15515, 1.15500, 1.15490, 1.15480, 1.15470, 1.15460]
+    opens = [1.15470] * (n - 6) + [1.15490, 1.15515, 1.15500, 1.15490, 1.15480, 1.15470]
+    volumes = [100.0] * n
+
+    m1_data = TimeframeData("M1", times, opens, highs, lows, closes, volumes, [1.0] * n)
+    m15_data = TimeframeData("M15", times, opens, highs, lows, closes, volumes, [1.0] * n)
+
+    # Even if caller erroneously passes point_value=1.0 or tick dollar value
+    seq = engine.detect_xau_scalp_sequence(
+        m15_data=m15_data,
+        m1_data=m1_data,
+        m1_atr=0.00030,
+        point_value=1.0,  # Deliberately test defensive clamping
+        stops_level_points=10.0,
+        target_r=1.6,
+        min_sl_distance=0.0,
+    )
+    if seq:
+        assert seq["entry_price"] < 10.0
+        assert seq["sl_price"] < 10.0
+        assert seq["tp_price"] > 0.0
+        assert seq["sl_price"] > seq["entry_price"] if seq["direction"] == TradeDirection.SELL else seq["sl_price"] < seq["entry_price"]
+        # Stops distance must be in pips (e.g. < 0.01 = 100 pips), NEVER 20.0 points!
+        assert abs(seq["sl_price"] - seq["entry_price"]) < 0.01
+
+
+def test_pending_cluster_immune_to_manage_exits():
+    from xauusd_bot.trade.trade_manager import TradeManager
+    from xauusd_bot.order.entry import OrderEntry
+    from xauusd_bot.order.exit import ExitManager
+    from xauusd_bot.order.partial_close import PartialCloseManager
+    from xauusd_bot.risk.position_sizer import PositionSizer
+    from xauusd_bot.risk.daily_loss import DailyLossTracker
+    from xauusd_bot.risk.max_dd import MaxDDTracker
+    from xauusd_bot.risk.pyramid_manager import PyramidManager
+    from xauusd_bot.models import TimeframeData
+
+    conn = MagicMock()
+    conn.ensure_connected.return_value = True
+    cfg = TradingConfig()
+    order_entry = OrderEntry(conn, cfg)
+    exit_mgr = ExitManager(cfg)
+    trade_mgr = TradeManager(
+        order_entry=order_entry,
+        exit_mgr=exit_mgr,
+        partial_close=PartialCloseManager(),
+        pyramid_mgr=PyramidManager(cfg),
+        sizer=PositionSizer(),
+        daily_loss=DailyLossTracker(),
+        max_dd=MaxDDTracker(5.0, 1.0),
+    )
+
+    cluster = PyraCluster(signal_id="sig_test", symbol="XAUUSD", direction=TradeDirection.SELL)
+    leg = TradeLeg(position_ticket=12345, symbol="XAUUSD", lot_size=0.03, status=TradeStatus.PENDING)
+    cluster.legs.append(leg)
+    cluster.status = TradeStatus.PENDING
+
+    # Data with PSAR suggesting reversal
+    n = 20
+    times = list(range(n))
+    highs = [4330.0 + i * 0.5 for i in range(n)]
+    lows = [4328.0 + i * 0.5 for i in range(n)]
+    closes = [4329.0 + i * 0.5 for i in range(n)]
+    data_all = {"M1": TimeframeData("M1", times, closes, highs, lows, closes, [100.0] * n, [1.0] * n)}
+
+    actions = trade_mgr.manage_exits(cluster, data_all)
+    # Pending cluster must NEVER be exited or cancelled by manage_exits
+    assert actions == []
+    assert cluster.status == TradeStatus.PENDING
+    assert leg.status == TradeStatus.PENDING
+    conn.order_send.assert_not_called()
+
+
+def test_broker_spec_stops_validation():
+    from xauusd_bot.order.entry import OrderEntry
+    conn = MagicMock()
+    conn.symbol_info.return_value = None
+    entry = OrderEntry(conn, TradingConfig())
+
+    # 1. Invalid Negative TP
+    ok, msg = entry.validate_broker_spec("EURUSD", 1.16000, 1.16200, tp_price=-30.85, direction=TradeDirection.SELL)
+    assert not ok
+    assert "Invalid TP price" in msg
+
+    # 2. Invalid Stop side: SELL with SL below entry
+    ok, msg = entry.validate_broker_spec("EURUSD", 1.16000, 1.15500, tp_price=1.15000, direction=TradeDirection.SELL)
+    assert not ok
+    assert "Invalid SELL stop" in msg
+
+    # 3. Absurd Forex stop distance (e.g. 21.16 on a 1.16 currency pair)
+    ok, msg = entry.validate_broker_spec("EURUSD", 1.16000, 21.16000, tp_price=1.15000, direction=TradeDirection.SELL)
+    assert not ok
+    assert "abnormally large" in msg
+
+    # 4. Valid normal EURUSD order
+    ok, msg = entry.validate_broker_spec("EURUSD", 1.16000, 1.16200, tp_price=1.15600, direction=TradeDirection.SELL)
+    assert ok
+

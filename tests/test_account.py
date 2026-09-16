@@ -87,7 +87,15 @@ def test_point_value_fallback():
     conn = _make_connector()
     conn.symbol_info.return_value = None
     am = AccountManager(conn)
-    assert am.point_value() == 0.01
+    assert am.point_value() == 1.0
+
+
+def test_eur_point_size_fallback():
+    conn = _make_connector()
+    am = AccountManager(conn)
+    assert am.point_size("XAUUSD") == 0.01
+    conn.symbol_info.return_value = None
+    assert am.point_size("EURUSD") == 0.00001
 
 
 def test_contract_size():
