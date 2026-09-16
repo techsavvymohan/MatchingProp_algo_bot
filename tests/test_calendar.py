@@ -73,10 +73,17 @@ def test_calendar_events_after_now():
 
 def test_calendar_offline_zero_artificial_events(monkeypatch):
     import urllib.request
+    import requests
+
     def mock_urlopen(*args, **kwargs):
         raise urllib.error.URLError("No network connection")
 
+    def mock_requests_get(*args, **kwargs):
+        raise requests.exceptions.ConnectionError("No network connection")
+
     monkeypatch.setattr(urllib.request, "urlopen", mock_urlopen)
+    monkeypatch.setattr(requests, "get", mock_requests_get)
+    monkeypatch.setenv("LSE_API_KEY", "")
     cal = EconomicCalendar()
     result = cal.fetch(force=True)
     assert not result

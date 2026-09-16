@@ -766,6 +766,11 @@ class XAUUSDBot:
                     time.sleep(poll_s)
                     continue
 
+                if not getattr(self, "_capital_calibrated", False) and account_info and account_info.balance > 0:
+                    self._capital_calibrated = True
+                    self.sizer.initial_balance = account_info.balance
+                    log.info("🎯 Dynamic Capital Auto-Calibration: Locked baseline capital to live MT5 balance: $%.2f", account_info.balance)
+
                 self.daily_loss.update(account_info)
                 self.max_dd.update(account_info.equity)
 

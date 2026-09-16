@@ -56,6 +56,10 @@ class PositionSizer:
         if risk_per_unit <= 0:
             return min_lot
 
+        if getattr(account, "balance", 0.0) > 0 and self.initial_balance <= 0:
+            self.initial_balance = account.balance
+            log.info("PositionSizer dynamically auto-calibrated baseline to account balance: $%.2f", self.initial_balance)
+
         if self.enable_profit_compounding and self.initial_balance > 0:
             # House Money Compounding: Anchor base risk to initial_balance in drawdown, compound when ahead
             eff_equity = max(account.equity, self.initial_balance)
