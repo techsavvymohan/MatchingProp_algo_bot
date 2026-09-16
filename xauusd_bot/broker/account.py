@@ -63,8 +63,12 @@ class AccountManager:
     def point_value(self, symbol: str = "XAUUSD") -> float:
         info = self._symbol_info(symbol)
         if info is None:
-            return 1.0 if "EUR" in symbol else 0.01
-        return info.trade_tick_value or (1.0 if "EUR" in symbol else 0.01)
+            return 1.0
+        curr_profit = getattr(info, "currency_profit", "")
+        acct_curr = getattr(self._last_info, "currency", "USD") if self._last_info else "USD"
+        if curr_profit == acct_curr or curr_profit == "USD":
+            return 1.0
+        return info.trade_tick_value or 1.0
 
     def contract_size(self, symbol: str = "XAUUSD") -> int:
         info = self._symbol_info(symbol)
