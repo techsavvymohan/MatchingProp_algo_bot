@@ -1517,6 +1517,7 @@ class XAUUSDBot:
 def main():
     parser = argparse.ArgumentParser(description="XAUUSD Digger Bot")
     parser.add_argument("--env", type=str, default=None, help="Path to .env file")
+    parser.add_argument("--live", action="store_true", help="Run in live trading mode (default)")
     parser.add_argument("--backtest", type=str, default=None, help="Path to backtest data JSON")
     parser.add_argument("--config", type=str, default=None, help="Path to config JSON")
     parser.add_argument("--balance", type=float, default=None, help="Initial backtest balance in USD (e.g. 10000)")
