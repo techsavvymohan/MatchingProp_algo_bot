@@ -808,7 +808,7 @@ class XAUUSDBot:
                         continue
 
                     strategy_type = getattr(self.cfg.trading, "strategy_trigger_type", "momentum")
-                    if (symbol == "XAUUSD" or "EUR" in symbol) and strategy_type in ("xau_liquidity_sweep_fvg_m1", "liquidity_sweep_fvg"):
+                    if ("XAU" in symbol or "GOLD" in symbol.upper() or "EUR" in symbol) and strategy_type in ("xau_liquidity_sweep_fvg_m1", "liquidity_sweep_fvg"):
                         self._process_xau_scalp_lifecycle(data_all, symbol, account_info)
                     else:
                         hierarchy_result = self.hierarchy.evaluate(data_all, current_session())

@@ -94,9 +94,10 @@ def check_config():
     from xauusd_bot.config import Config
     cfg = Config.load()
     
-    # 1. Dual Pair check
     symbols = getattr(cfg.trading, "symbols", []) or [getattr(cfg.trading, "symbol", "XAUUSD")]
-    dual_pair = "XAUUSD" in symbols and "EURUSD" in symbols
+    has_gold = any("XAU" in s.upper() or "GOLD" in s.upper() for s in symbols)
+    has_eur = any("EUR" in s.upper() for s in symbols)
+    dual_pair = has_gold and has_eur
     check_mark(dual_pair, "Active Trading Pairs", f"{symbols}")
 
     # 2. Risk check (0.85%)
@@ -191,7 +192,8 @@ def check_symbols(mt5, cfg, account):
     )
     acct_model = AccountInfo(balance=account.balance, equity=account.equity)
 
-    for sym in ["XAUUSD", "EURUSD"]:
+    symbols = getattr(cfg.trading, "symbols", []) or [getattr(cfg.trading, "symbol", "XAUUSD")]
+    for sym in symbols:
         # Ensure selected in Market Watch
         mt5.symbol_select(sym, True)
         info = mt5.symbol_info(sym)
