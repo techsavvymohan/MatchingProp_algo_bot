@@ -198,7 +198,14 @@ def check_symbols(mt5, cfg, account):
         tick = mt5.symbol_info_tick(sym)
 
         if not info or not tick:
-            check_mark(False, f"{sym} Market Watch Subscription", "Symbol not found in broker terminal")
+            # Query all available symbols from broker
+            all_broker_syms = [s.name for s in (mt5.symbols_get() or [])]
+            key1 = "XAU" if "XAU" in sym else "EURUSD"
+            matches = [s for s in all_broker_syms if key1 in s.upper() or ("GOLD" in s.upper() if "XAU" in sym else False)]
+            if matches:
+                check_mark(False, f"{sym} Market Watch Subscription", f"Broker uses: {matches}. Set SYMBOLS={','.join(matches[:2])} in .env")
+            else:
+                check_mark(False, f"{sym} Market Watch Subscription", "Not found. In MT5, Right-Click 'Market Watch' -> Click 'Show All'")
             continue
 
         spread_pts = round((tick.ask - tick.bid) / (info.point or 1e-5), 1)
