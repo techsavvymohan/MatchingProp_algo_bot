@@ -79,6 +79,11 @@ class MT5Connector:
             return False
         return mt5.symbol_select(symbol, enable)
 
+    def symbols_get(self):
+        if mt5 is None:
+            return []
+        return mt5.symbols_get() or []
+
     def account_info(self):
         return mt5.account_info()
 

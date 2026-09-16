@@ -745,6 +745,36 @@ class XAUUSDBot:
             return
         log.info("MT5 connected successfully")
 
+        # Auto-resolve symbols to match broker naming conventions (e.g. .x, .pro, .raw, +)
+        resolved_symbols = []
+        for sym in self.symbols:
+            if self.connector.symbol_info(sym) is not None:
+                resolved_symbols.append(sym)
+                continue
+            resolved = sym
+            for suffix in [".x", ".pro", ".raw", "+", "m", ".s", "_sb"]:
+                candidate = f"{sym}{suffix}"
+                if self.connector.symbol_info(candidate) is not None:
+                    resolved = candidate
+                    break
+            if resolved == sym:
+                all_b = [s.name for s in self.connector.symbols_get()]
+                for s in all_b:
+                    if s.upper().startswith(sym.upper()):
+                        resolved = s
+                        break
+            if resolved != sym:
+                log.info("🎯 Auto-Resolved Broker Symbol: '%s' -> '%s'", sym, resolved)
+            resolved_symbols.append(resolved)
+        self.symbols = resolved_symbols
+
+        # Re-initialize feeds for resolved symbols and subscribe
+        self.data_feeds = {s: MultiTFData(self.connector, s) for s in self.symbols}
+        self.spread_trackers = {s: SpreadTracker(self.cfg.trading.spread_lookback_bars) for s in self.symbols}
+        self.spread_filters = {s: SpreadFilter(self.spread_trackers[s], self.cfg.trading.max_spread_multiplier) for s in self.symbols}
+        for s in self.symbols:
+            self.connector.symbol_select(s, True)
+
         self.persistence.connect()
         saved_state = self.persistence.load_daily_state()
         if saved_state:
