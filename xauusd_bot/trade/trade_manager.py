@@ -95,6 +95,10 @@ class TradeManager:
 
         cluster = self.pyramid_mgr.create_cluster(signal.id, signal.direction, signal.entry_tf)
         cluster.symbol = getattr(signal, "symbol", "XAUUSD")
+        cluster.fvg_low = getattr(signal, "fvg_low", 0.0)
+        cluster.fvg_high = getattr(signal, "fvg_high", 0.0)
+        cluster.highest_price = leg.entry_price
+        cluster.lowest_price = leg.entry_price
         cluster.legs.append(leg)
         cluster.collective_sl = signal.sl_price
         cluster.open_time = leg.open_time
@@ -167,6 +171,8 @@ class TradeManager:
         cluster.symbol = getattr(signal, "symbol", "XAUUSD")
         cluster.fvg_low = getattr(signal, "fvg_low", 0.0)
         cluster.fvg_high = getattr(signal, "fvg_high", 0.0)
+        cluster.highest_price = limit_price
+        cluster.lowest_price = limit_price
         cluster.legs.append(leg)
         cluster.collective_sl = signal.sl_price
         cluster.open_time = leg.open_time
@@ -174,7 +180,6 @@ class TradeManager:
         return cluster
 
     def manage_pyramid_add(
-
         self,
         signal: Signal,
         cluster: PyraCluster,
@@ -199,7 +204,6 @@ class TradeManager:
         total_risk = cluster.total_risk_amount(point_value, contract_size)
         risk_budget = remaining_budget - total_risk
         if risk_budget <= 0:
-            log.info("No risk budget for pyramid add")
             return None
 
         lot = self.sizer.calculate_lot_size(
@@ -217,28 +221,22 @@ class TradeManager:
         if lot <= 0:
             return None
 
-        entry_data = data_all.get(signal.entry_tf or "M1")
-        atr_val = 0
-        if entry_data:
-            from ..indicators.atr import atr as calc_atr
-            atr_val = calc_atr(entry_data.high, entry_data.low, entry_data.close, 14) or 0
-
-        sl = self.exit_mgr.calc_atr_sl(entry_data or data_all.get("M15"), cluster.direction, signal.entry_tf or "M15")
-
-        signal.sl_price = sl
         signal.lot_size = lot
         signal.entry_price = price
-        signal.is_pyramid_add = True
-
+        signal.sl_price = cluster.collective_sl
         leg = self.order_entry.place_market_order(signal, account, point_value, contract_size, min_lot, lot_step)
         if leg is None:
             return None
 
         cluster.legs.append(leg)
+        cluster.collective_sl = cluster.avg_entry_price()
         if cluster.direction == TradeDirection.BUY:
             cluster.highest_price = max(cluster.highest_price, price)
         else:
-            cluster.lowest_price = min(cluster.lowest_price, price)
+            if cluster.lowest_price <= 0.0:
+                cluster.lowest_price = price
+            else:
+                cluster.lowest_price = min(cluster.lowest_price, price)
         self.daily_loss.register_trade()
         log.info("Pyramid add: leg=%d %.2f lots at %.2f cluster=%s",
                  cluster.leg_count(), lot, price, cluster.cluster_id[:8])
@@ -258,13 +256,25 @@ class TradeManager:
             return actions
         current_price = m1_data.close[-1]
 
+        # 1. Update high-water / low-water extremes safely
         if cluster.direction == TradeDirection.BUY:
             cluster.highest_price = max(cluster.highest_price, current_price)
         else:
-            cluster.lowest_price = min(cluster.lowest_price, current_price)
+            if cluster.lowest_price <= 0.0:
+                cluster.lowest_price = current_price
+            else:
+                cluster.lowest_price = min(cluster.lowest_price, current_price)
 
-        # Breakeven Ratchet (+1.0R move -> locks in +0.05R to guarantee no winner becomes a loser)
         cfg_obj = getattr(self.exit_mgr, "config", getattr(self.exit_mgr, "cfg", None))
+
+        # Check if this cluster is an FVG / Liquidity Sweep scalp setup
+        is_fvg_trade = (
+            getattr(cluster, "fvg_low", 0.0) > 0
+            or getattr(cluster, "fvg_high", 0.0) > 0
+            or getattr(cfg_obj, "strategy_trigger_type", "") in ("xau_liquidity_sweep_fvg_m1", "liquidity_sweep_fvg")
+        )
+
+        # 2. Dynamic Breakeven Ratchet (+1.0R move -> locks in +0.05R to guarantee no winner becomes a loser)
         be_enabled = getattr(cfg_obj, "xau_breakeven_ratchet_enabled", True)
         if not isinstance(be_enabled, bool):
             be_enabled = True
@@ -290,6 +300,7 @@ class TradeManager:
                             self.order_entry.modify_sl_tp(leg.position_ticket, new_be, leg.tp_price)
                 actions.append({"action": "breakeven_ratchet", "sl": new_be, "cluster": cluster.cluster_id})
 
+        # 3. Partial TP check
         pc_enabled = getattr(cfg_obj, "xau_partial_close_enabled", True)
         if not isinstance(pc_enabled, bool):
             pc_enabled = True
@@ -304,29 +315,65 @@ class TradeManager:
             self.pyramid_mgr.activate_breakeven(cluster)
             actions.append({"action": "partial_tp", "cluster": cluster.cluster_id})
 
-        if self.exit_mgr.check_time_exit(cluster):
+        # 4. Holding time exit (only for non-FVG trades, or trades meeting full threshold)
+        if not is_fvg_trade and self.exit_mgr.check_time_exit(cluster):
             self._close_cluster_positions(cluster, current_price, ExitReason.TIME_BASED)
             pnl_tot = sum(getattr(l, "pnl", 0.0) for l in cluster.legs)
             actions.append({"action": "time_exit", "cluster": cluster.cluster_id, "price": current_price, "pnl": pnl_tot})
             return actions
 
-        psar_exit = self.exit_mgr.check_psar_exit(m5_data or m1_data, cluster)
-        if psar_exit is not None:
-            self._close_cluster_positions(cluster, current_price, ExitReason.SIGNAL_REVERSAL)
-            pnl_tot = sum(getattr(l, "pnl", 0.0) for l in cluster.legs)
-            actions.append({"action": "psar_exit", "cluster": cluster.cluster_id, "price": current_price, "pnl": pnl_tot})
-            return actions
+        # 5. Parabolic SAR Signal Reversal Exit
+        # CRITICAL PROTECTION: FVG scalp trades enter counter-trend into sweeps; M5 PSAR naturally opposes them at entry.
+        # Decouple PSAR reversal exit from FVG scalps so they are never closed prematurely on tick #1.
+        # For non-FVG (momentum) trades, require at least 180s holding time and config enablement.
+        enable_psar = getattr(cfg_obj, "enable_psar_trailing", True)
+        from datetime import datetime, timezone
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        trade_age_s = (now_utc - cluster.open_time).total_seconds() if cluster.open_time else 999.0
 
-        chandelier_stop = self.exit_mgr.check_chandelier_exit(m5_data or m1_data, cluster)
-        if chandelier_stop is not None:
-            if cluster.direction == TradeDirection.BUY and current_price <= chandelier_stop:
-                self._close_cluster_positions(cluster, current_price, ExitReason.CHANDELIER_TRAIL)
+        if not is_fvg_trade and enable_psar and trade_age_s >= 180.0:
+            psar_exit = self.exit_mgr.check_psar_exit(m5_data or m1_data, cluster)
+            if psar_exit is not None:
+                self._close_cluster_positions(cluster, current_price, ExitReason.SIGNAL_REVERSAL)
                 pnl_tot = sum(getattr(l, "pnl", 0.0) for l in cluster.legs)
-                actions.append({"action": "chandelier_exit", "cluster": cluster.cluster_id, "price": current_price, "pnl": pnl_tot})
-            elif cluster.direction == TradeDirection.SELL and current_price >= chandelier_stop:
-                self._close_cluster_positions(cluster, current_price, ExitReason.CHANDELIER_TRAIL)
-                pnl_tot = sum(getattr(l, "pnl", 0.0) for l in cluster.legs)
-                actions.append({"action": "chandelier_exit", "cluster": cluster.cluster_id, "price": current_price, "pnl": pnl_tot})
+                actions.append({"action": "psar_exit", "cluster": cluster.cluster_id, "price": current_price, "pnl": pnl_tot})
+                return actions
+
+        # 6. Chandelier Exit / Trailing Ratchet
+        # For FVG scalp trades, Chandelier trailing ONLY ratchets runner legs that have already banked partial TP,
+        # or when position has moved significantly in favor (never kills a freshly opened base position).
+        # For momentum trades, checks chandelier trailing after minimum holding duration.
+        if is_fvg_trade:
+            runner_legs = [l for l in cluster.legs if l.status == TradeStatus.OPEN and getattr(l, "_is_runner", False)]
+            if runner_legs:
+                trail_stop = self.exit_mgr.check_chandelier_exit(m1_data, cluster)
+                if trail_stop is not None:
+                    for r_leg in runner_legs:
+                        if cluster.direction == TradeDirection.BUY and current_price <= trail_stop:
+                            sym = getattr(r_leg, "symbol", "") or getattr(cluster, "symbol", "")
+                            self.order_entry.close_position(r_leg.position_ticket, r_leg.lot_size, r_leg.direction, symbol=sym)
+                            r_leg.status = TradeStatus.CLOSED
+                            r_leg.exit_price = current_price
+                            r_leg.exit_reason = ExitReason.CHANDELIER_TRAIL
+                            actions.append({"action": "runner_chandelier_exit", "cluster": cluster.cluster_id, "price": current_price})
+                        elif cluster.direction == TradeDirection.SELL and current_price >= trail_stop:
+                            sym = getattr(r_leg, "symbol", "") or getattr(cluster, "symbol", "")
+                            self.order_entry.close_position(r_leg.position_ticket, r_leg.lot_size, r_leg.direction, symbol=sym)
+                            r_leg.status = TradeStatus.CLOSED
+                            r_leg.exit_price = current_price
+                            r_leg.exit_reason = ExitReason.CHANDELIER_TRAIL
+                            actions.append({"action": "runner_chandelier_exit", "cluster": cluster.cluster_id, "price": current_price})
+        else:
+            chandelier_stop = self.exit_mgr.check_chandelier_exit(m5_data or m1_data, cluster)
+            if chandelier_stop is not None:
+                if cluster.direction == TradeDirection.BUY and current_price <= chandelier_stop:
+                    self._close_cluster_positions(cluster, current_price, ExitReason.CHANDELIER_TRAIL)
+                    pnl_tot = sum(getattr(l, "pnl", 0.0) for l in cluster.legs)
+                    actions.append({"action": "chandelier_exit", "cluster": cluster.cluster_id, "price": current_price, "pnl": pnl_tot})
+                elif cluster.direction == TradeDirection.SELL and current_price >= chandelier_stop:
+                    self._close_cluster_positions(cluster, current_price, ExitReason.CHANDELIER_TRAIL)
+                    pnl_tot = sum(getattr(l, "pnl", 0.0) for l in cluster.legs)
+                    actions.append({"action": "chandelier_exit", "cluster": cluster.cluster_id, "price": current_price, "pnl": pnl_tot})
         return actions
 
     def _close_cluster_positions(self, cluster: PyraCluster, price: float, reason: ExitReason):

@@ -1050,8 +1050,13 @@ class XAUUSDBot:
             for pc in list(pending_clusters):
                 for leg in pc.legs:
                     if leg.position_ticket in pos_tickets:
+                        now_utc_naive = now_utc.replace(tzinfo=None)
                         leg.status = TradeStatus.OPEN
+                        leg.open_time = now_utc_naive
                         pc.status = TradeStatus.OPEN
+                        pc.open_time = now_utc_naive
+                        pc.highest_price = current_price
+                        pc.lowest_price = current_price
                         log.info("[%s] ⚡ Pending limit order filled into OPEN position: ticket=%d", symbol, leg.position_ticket)
                         if pc in pending_clusters:
                             pending_clusters.remove(pc)
